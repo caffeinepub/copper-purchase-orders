@@ -110,6 +110,13 @@ actor {
   let purchaseOrdersV2 = Map.empty<Nat, PurchaseOrder>();
   let productRates = Map.empty<Text, ProductRate>();
 
+  // ── Default rates (INR) ─────────────────────────────────────────────────────
+  productRates.add("copperWire", { productType = #copperWire; pricePerUnit = "850"; currency = "INR"; unit = "kg"; notes = ""; updatedAt = 0 });
+  productRates.add("copperSheet", { productType = #copperSheet; pricePerUnit = "900"; currency = "INR"; unit = "kg"; notes = ""; updatedAt = 0 });
+  productRates.add("copperPipe", { productType = #copperPipe; pricePerUnit = "950"; currency = "INR"; unit = "kg"; notes = ""; updatedAt = 0 });
+  productRates.add("copperRod", { productType = #copperRod; pricePerUnit = "880"; currency = "INR"; unit = "kg"; notes = ""; updatedAt = 0 });
+  // ────────────────────────────────────────────────────────────────────────────
+
   var nextOrderId = 1;
   var migrationDone = false;
   // ────────────────────────────────────────────────────────────────────────────
@@ -314,16 +321,13 @@ actor {
 
   // ── Rates management ────────────────────────────────────────────────────────
 
-  public shared ({ caller }) func setProductRate(
+  public shared func setProductRate(
     productType : CopperProductType,
     pricePerUnit : Text,
     currency : Text,
     unit : Text,
     notes : Text,
   ) : async () {
-    if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized: Only admins can set rates");
-    };
     let key = switch (productType) {
       case (#copperWire) { "copperWire" };
       case (#copperSheet) { "copperSheet" };
