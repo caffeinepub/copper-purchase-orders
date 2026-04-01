@@ -1,0 +1,569 @@
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { ArrowLeft, Loader2, Plus, Trash2, Zap } from "lucide-react";
+import { motion } from "motion/react";
+import { useRef, useState } from "react";
+import { toast } from "sonner";
+import { CopperProductType } from "../backend.d";
+import type { ProductItem } from "../backend.d";
+import { useSubmitOrder } from "../hooks/useQueries";
+
+interface Props {
+  email: string;
+  onSuccess: (orderId: bigint) => void;
+}
+
+interface LineItem {
+  id: number;
+  productType: CopperProductType | "";
+  size: string;
+  quantity: string;
+  unitOfMeasurement: string;
+}
+
+const SIZE_OPTIONS: Record<CopperProductType, string[]> = {
+  [CopperProductType.copperWire]: [
+    "AWG 4",
+    "AWG 6",
+    "AWG 8",
+    "AWG 10",
+    "AWG 12",
+  ],
+  [CopperProductType.copperSheet]: ["0.5mm", "1mm", "2mm", "3mm", "5mm"],
+  [CopperProductType.copperPipe]: [
+    "1/4 inch",
+    "3/8 inch",
+    "1/2 inch",
+    "3/4 inch",
+    "1 inch",
+  ],
+  [CopperProductType.copperRod]: ["6mm", "8mm", "10mm", "12mm", "16mm", "20mm"],
+};
+
+let _id = 0;
+function emptyItem(): LineItem {
+  return {
+    id: ++_id,
+    productType: "",
+    size: "",
+    quantity: "",
+    unitOfMeasurement: "",
+  };
+}
+
+export default function OrderFormPage({ email, onSuccess }: Props) {
+  const [form, setForm] = useState({
+    email,
+    customerName: "",
+    companyName: "",
+    phoneNumber: "",
+    requiredDeliveryDate: "",
+    specialNotes: "",
+  });
+  const [items, setItems] = useState<LineItem[]>([emptyItem()]);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const submitOrder = useSubmitOrder();
+
+  function setField(field: string, value: string) {
+    setForm((prev) => ({ ...prev, [field]: value }));
+    setErrors((prev) => ({ ...prev, [field]: "" }));
+  }
+
+  function updateItem(idx: number, key: keyof LineItem, value: string) {
+    setItems((prev) => {
+      const next = prev.map((item, i) => {
+        if (i !== idx) return item;
+        const updated = { ...item, [key]: value };
+        if (key === "productType") updated.size = "";
+        return updated;
+      });
+      return next;
+    });
+    setErrors((prev) => ({ ...prev, [`item_${idx}_${key}`]: "" }));
+  }
+
+  function addItem() {
+    setItems((prev) => [...prev, emptyItem()]);
+  }
+
+  function removeItem(idx: number) {
+    setItems((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function validate() {
+    const errs: Record<string, string> = {};
+    if (!form.email.trim()) errs.email = "Email is required.";
+    if (!form.customerName.trim()) errs.customerName = "Name is required.";
+    if (!form.companyName.trim()) errs.companyName = "Company is required.";
+    if (!form.phoneNumber.trim()) errs.phoneNumber = "Phone is required.";
+    if (!form.requiredDeliveryDate)
+      errs.requiredDeliveryDate = "Select a delivery date.";
+    if (items.length === 0) errs.items = "Add at least one product.";
+    items.forEach((item, i) => {
+      if (!item.productType) errs[`item_${i}_productType`] = "Select product.";
+      if (!item.size) errs[`item_${i}_size`] = "Select size.";
+      if (!item.quantity || Number(item.quantity) <= 0)
+        errs[`item_${i}_quantity`] = "Enter qty.";
+      if (!item.unitOfMeasurement)
+        errs[`item_${i}_unitOfMeasurement`] = "Select unit.";
+    });
+    return errs;
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs = validate();
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs);
+      toast.error("Please fill in all required fields.");
+      return;
+    }
+    try {
+      const productItems: ProductItem[] = items.map((item) => ({
+        productType: item.productType as CopperProductType,
+        size: item.size,
+        quantity: BigInt(item.quantity),
+        unitOfMeasurement: item.unitOfMeasurement,
+      }));
+      const orderId = await submitOrder.mutateAsync({
+        email: form.email.trim(),
+        customerName: form.customerName.trim(),
+        companyName: form.companyName.trim(),
+        phoneNumber: form.phoneNumber.trim(),
+        items: productItems,
+        requiredDeliveryDate: form.requiredDeliveryDate,
+        specialNotes: form.specialNotes.trim(),
+      });
+      onSuccess(orderId);
+    } catch {
+      toast.error("Failed to submit order. Please try again.");
+    }
+  }
+
+  const fieldErr = (key: string) =>
+    errors[key] ? (
+      <p
+        className="text-xs text-destructive mt-1"
+        data-ocid={`order.${key}_error` as any}
+      >
+        {errors[key]}
+      </p>
+    ) : null;
+
+  return (
+    <div className="min-h-screen bg-background">
+      <header className="border-b border-border bg-card shadow-xs">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-8 h-8 rounded-md flex items-center justify-center"
+              style={{ background: "oklch(0.62 0.12 55)" }}
+            >
+              <Zap className="w-4 h-4 text-white" />
+            </div>
+            <span className="font-display font-bold text-foreground">
+              Copper Orders
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              sessionStorage.removeItem("gated_email");
+              window.location.reload();
+            }}
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            data-ocid="nav.link"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            Back
+          </button>
+        </div>
+      </header>
+
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 py-10">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+        >
+          <div className="mb-8">
+            <h1 className="font-display text-3xl font-bold text-foreground">
+              Purchase Order
+            </h1>
+            <p className="text-muted-foreground mt-1">
+              Fill in the details below to place your copper order.
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} data-ocid="order.modal">
+            <div className="space-y-6">
+              {/* Contact Information */}
+              <Card className="shadow-copper">
+                <CardHeader>
+                  <CardTitle className="font-display text-xl">
+                    Contact Information
+                  </CardTitle>
+                  <CardDescription>
+                    Your details for order processing.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="email">Email Address</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        value={form.email}
+                        onChange={(e) => setField("email", e.target.value)}
+                        className="mt-1"
+                        data-ocid="order.email.input"
+                      />
+                      {fieldErr("email")}
+                    </div>
+                    <div>
+                      <Label htmlFor="customerName">Full Name</Label>
+                      <Input
+                        id="customerName"
+                        value={form.customerName}
+                        onChange={(e) =>
+                          setField("customerName", e.target.value)
+                        }
+                        placeholder="John Smith"
+                        className="mt-1"
+                        data-ocid="order.customerName.input"
+                      />
+                      {fieldErr("customerName")}
+                    </div>
+                    <div>
+                      <Label htmlFor="companyName">Company Name</Label>
+                      <Input
+                        id="companyName"
+                        value={form.companyName}
+                        onChange={(e) =>
+                          setField("companyName", e.target.value)
+                        }
+                        placeholder="Acme Industries"
+                        className="mt-1"
+                        data-ocid="order.companyName.input"
+                      />
+                      {fieldErr("companyName")}
+                    </div>
+                    <div>
+                      <Label htmlFor="phoneNumber">Phone Number</Label>
+                      <Input
+                        id="phoneNumber"
+                        type="tel"
+                        value={form.phoneNumber}
+                        onChange={(e) =>
+                          setField("phoneNumber", e.target.value)
+                        }
+                        placeholder="+1 (555) 000-0000"
+                        className="mt-1"
+                        data-ocid="order.phoneNumber.input"
+                      />
+                      {fieldErr("phoneNumber")}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Products */}
+              <Card className="shadow-copper">
+                <CardHeader>
+                  <CardTitle className="font-display text-xl">
+                    Products
+                  </CardTitle>
+                  <CardDescription>
+                    Add one or more copper products to your order.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {errors.items && (
+                    <p
+                      className="text-xs text-destructive"
+                      data-ocid="order.items_error"
+                    >
+                      {errors.items}
+                    </p>
+                  )}
+
+                  {items.map((item, idx) => (
+                    <motion.div
+                      key={item.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="relative p-4 rounded-lg border border-border bg-muted/30"
+                      data-ocid={`order.item.${idx + 1}` as any}
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <span
+                          className="text-xs font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full"
+                          style={{
+                            background: "oklch(0.92 0.04 55)",
+                            color: "oklch(0.45 0.1 50)",
+                          }}
+                        >
+                          Item {idx + 1}
+                        </span>
+                        {items.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeItem(idx)}
+                            className="text-muted-foreground hover:text-destructive transition-colors"
+                            data-ocid={`order.delete_button.${idx + 1}` as any}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        {/* Product Type */}
+                        <div>
+                          <Label className="text-xs">Product Type</Label>
+                          <Select
+                            value={item.productType}
+                            onValueChange={(v) =>
+                              updateItem(idx, "productType", v)
+                            }
+                          >
+                            <SelectTrigger
+                              className="mt-1 h-9"
+                              data-ocid={"order.productType.select" as any}
+                            >
+                              <SelectValue placeholder="Select..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={CopperProductType.copperWire}>
+                                Copper Wire
+                              </SelectItem>
+                              <SelectItem value={CopperProductType.copperSheet}>
+                                Copper Sheet
+                              </SelectItem>
+                              <SelectItem value={CopperProductType.copperPipe}>
+                                Copper Pipe
+                              </SelectItem>
+                              <SelectItem value={CopperProductType.copperRod}>
+                                Copper Rod
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {errors[`item_${idx}_productType`] && (
+                            <p className="text-xs text-destructive mt-1">
+                              {errors[`item_${idx}_productType`]}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Size */}
+                        <div>
+                          <Label className="text-xs">Size</Label>
+                          <Select
+                            value={item.size}
+                            onValueChange={(v) => updateItem(idx, "size", v)}
+                            disabled={!item.productType}
+                          >
+                            <SelectTrigger
+                              className="mt-1 h-9"
+                              data-ocid={"order.size.select" as any}
+                            >
+                              <SelectValue
+                                placeholder={
+                                  item.productType
+                                    ? "Select size..."
+                                    : "Select product first"
+                                }
+                              />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {item.productType
+                                ? SIZE_OPTIONS[
+                                    item.productType as CopperProductType
+                                  ].map((s) => (
+                                    <SelectItem key={s} value={s}>
+                                      {s}
+                                    </SelectItem>
+                                  ))
+                                : null}
+                            </SelectContent>
+                          </Select>
+                          {errors[`item_${idx}_size`] && (
+                            <p className="text-xs text-destructive mt-1">
+                              {errors[`item_${idx}_size`]}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Quantity */}
+                        <div>
+                          <Label htmlFor={`qty-${idx}`} className="text-xs">
+                            Quantity
+                          </Label>
+                          <Input
+                            id={`qty-${idx}`}
+                            type="number"
+                            min="1"
+                            value={item.quantity}
+                            onChange={(e) =>
+                              updateItem(idx, "quantity", e.target.value)
+                            }
+                            placeholder="100"
+                            className="mt-1 h-9"
+                            data-ocid={"order.quantity.input" as any}
+                          />
+                          {errors[`item_${idx}_quantity`] && (
+                            <p className="text-xs text-destructive mt-1">
+                              {errors[`item_${idx}_quantity`]}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Unit */}
+                        <div>
+                          <Label className="text-xs">Unit</Label>
+                          <Select
+                            value={item.unitOfMeasurement}
+                            onValueChange={(v) =>
+                              updateItem(idx, "unitOfMeasurement", v)
+                            }
+                          >
+                            <SelectTrigger
+                              className="mt-1 h-9"
+                              data-ocid={"order.unit.select" as any}
+                            >
+                              <SelectValue placeholder="Unit..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="kg">kg</SelectItem>
+                              <SelectItem value="tons">tons</SelectItem>
+                              <SelectItem value="meters">meters</SelectItem>
+                              <SelectItem value="pieces">pieces</SelectItem>
+                              <SelectItem value="rolls">rolls</SelectItem>
+                              <SelectItem value="sheets">sheets</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {errors[`item_${idx}_unitOfMeasurement`] && (
+                            <p className="text-xs text-destructive mt-1">
+                              {errors[`item_${idx}_unitOfMeasurement`]}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={addItem}
+                    className="w-full gap-2 border-dashed"
+                    style={{
+                      borderColor: "oklch(0.75 0.06 55)",
+                      color: "oklch(0.55 0.1 55)",
+                    }}
+                    data-ocid="order.secondary_button"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Another Product
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* Delivery & Notes */}
+              <Card className="shadow-copper">
+                <CardHeader>
+                  <CardTitle className="font-display text-xl">
+                    Delivery Details
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <Label htmlFor="requiredDeliveryDate">
+                      Required Delivery Date
+                    </Label>
+                    <Input
+                      id="requiredDeliveryDate"
+                      type="date"
+                      value={form.requiredDeliveryDate}
+                      onChange={(e) =>
+                        setField("requiredDeliveryDate", e.target.value)
+                      }
+                      className="mt-1"
+                      min={new Date().toISOString().split("T")[0]}
+                      data-ocid="order.deliveryDate.input"
+                    />
+                    {fieldErr("requiredDeliveryDate")}
+                  </div>
+                  <div>
+                    <Label htmlFor="specialNotes">Special Notes</Label>
+                    <Textarea
+                      id="specialNotes"
+                      value={form.specialNotes}
+                      onChange={(e) => setField("specialNotes", e.target.value)}
+                      placeholder="Any special requirements, delivery instructions, or specifications..."
+                      className="mt-1 min-h-[100px]"
+                      data-ocid="order.notes.textarea"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="pt-2">
+                <Button
+                  type="submit"
+                  size="lg"
+                  className="w-full sm:w-auto font-semibold px-10"
+                  disabled={submitOrder.isPending}
+                  style={{
+                    background: "oklch(0.62 0.12 55)",
+                    color: "white",
+                  }}
+                  data-ocid="order.submit_button"
+                >
+                  {submitOrder.isPending ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />{" "}
+                      Submitting...
+                    </>
+                  ) : (
+                    "Submit Purchase Order"
+                  )}
+                </Button>
+              </div>
+            </div>
+          </form>
+        </motion.div>
+      </main>
+
+      <footer className="py-8 text-center text-xs text-muted-foreground">
+        © {new Date().getFullYear()}. Built with love using{" "}
+        <a
+          href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
+          target="_blank"
+          rel="noreferrer"
+          className="hover:underline"
+          style={{ color: "oklch(0.62 0.12 55)" }}
+        >
+          caffeine.ai
+        </a>
+      </footer>
+    </div>
+  );
+}

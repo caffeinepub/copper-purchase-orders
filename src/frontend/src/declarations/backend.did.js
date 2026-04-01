@@ -1,0 +1,90 @@
+// @ts-nocheck
+export const idlFactory = ({ IDL }) => {
+  const CopperProductType = IDL.Variant({
+    'copperPipe' : IDL.Null,
+    'copperWire' : IDL.Null,
+    'copperSheet' : IDL.Null,
+    'copperRod' : IDL.Null,
+  });
+  const ProductItem = IDL.Record({
+    'productType' : CopperProductType,
+    'size' : IDL.Text,
+    'quantity' : IDL.Nat,
+    'unitOfMeasurement' : IDL.Text,
+  });
+  const PurchaseOrderInput = IDL.Record({
+    'customerName' : IDL.Text,
+    'items' : IDL.Vec(ProductItem),
+    'email' : IDL.Text,
+    'companyName' : IDL.Text,
+    'phoneNumber' : IDL.Text,
+    'requiredDeliveryDate' : IDL.Text,
+    'specialNotes' : IDL.Text,
+  });
+  const OrderStatus = IDL.Variant({
+    'shipped' : IDL.Null,
+    'cancelled' : IDL.Null,
+    'pending' : IDL.Null,
+    'completed' : IDL.Null,
+    'processing' : IDL.Null,
+  });
+  const SellerAvailability = IDL.Variant({
+    'available' : IDL.Null,
+    'unavailable' : IDL.Null,
+    'partial' : IDL.Null,
+  });
+  const PurchaseOrder = IDL.Record({
+    'id' : IDL.Nat,
+    'customerName' : IDL.Text,
+    'status' : OrderStatus,
+    'items' : IDL.Vec(ProductItem),
+    'email' : IDL.Text,
+    'timestamp' : IDL.Int,
+    'companyName' : IDL.Text,
+    'phoneNumber' : IDL.Text,
+    'requiredDeliveryDate' : IDL.Text,
+    'specialNotes' : IDL.Text,
+    'sellerReply' : IDL.Opt(IDL.Text),
+    'sellerAvailability' : IDL.Opt(SellerAvailability),
+    'sellerReplyTimestamp' : IDL.Opt(IDL.Int),
+  });
+  const UserProfile = IDL.Record({ 'name' : IDL.Text });
+  const UserRole = IDL.Variant({
+    'admin' : IDL.Null,
+    'user' : IDL.Null,
+    'guest' : IDL.Null,
+  });
+  return IDL.Service({
+    '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
+    'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
+    'getAllPurchaseOrders' : IDL.Func([], [IDL.Vec(PurchaseOrder)], ['query']),
+    'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
+    'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
+    'getOrderConfirmation' : IDL.Func([IDL.Nat], [IDL.Opt(PurchaseOrder)], ['query']),
+    'getOrderSummary' : IDL.Func(
+      [],
+      [
+        IDL.Record({
+          'cancelledOrders' : IDL.Nat,
+          'totalOrders' : IDL.Nat,
+          'pendingOrders' : IDL.Nat,
+          'processingOrders' : IDL.Nat,
+          'completedOrders' : IDL.Nat,
+          'shippedOrders' : IDL.Nat,
+          'awaitingReply' : IDL.Nat,
+        }),
+      ],
+      ['query'],
+    ),
+    'getOrdersByCompany' : IDL.Func([IDL.Text], [IDL.Vec(PurchaseOrder)], ['query']),
+    'getOrdersByStatus' : IDL.Func([OrderStatus], [IDL.Vec(PurchaseOrder)], ['query']),
+    'getUserProfile' : IDL.Func([IDL.Principal], [IDL.Opt(UserProfile)], ['query']),
+    'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
+    'replyToOrder' : IDL.Func([IDL.Nat, SellerAvailability, IDL.Text], [], []),
+    'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+    'submitPurchaseOrder' : IDL.Func([PurchaseOrderInput], [IDL.Nat], []),
+    'trackOrder' : IDL.Func([IDL.Nat, IDL.Text], [IDL.Opt(PurchaseOrder)], ['query']),
+    'updateOrderStatus' : IDL.Func([IDL.Nat, OrderStatus], [], []),
+  });
+};
+export const init = ({ IDL }) => { return []; };
