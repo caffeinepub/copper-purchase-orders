@@ -52,6 +52,14 @@ export interface PurchaseOrderInput {
   'requiredDeliveryDate' : string,
   'specialNotes' : string,
 }
+export interface ProductRate {
+  'productType' : CopperProductType,
+  'pricePerUnit' : string,
+  'currency' : string,
+  'unit' : string,
+  'notes' : string,
+  'updatedAt' : bigint,
+}
 export interface UserProfile { 'name' : string }
 export type UserRole = { 'admin' : null } |
   { 'user' : null } |
@@ -81,6 +89,8 @@ export interface _SERVICE {
   'isCallerAdmin' : ActorMethod<[], boolean>,
   'replyToOrder' : ActorMethod<[bigint, SellerAvailability, string], undefined>,
   'saveCallerUserProfile' : ActorMethod<[UserProfile], undefined>,
+  'setProductRate' : ActorMethod<[CopperProductType, string, string, string, string], undefined>,
+  'getProductRates' : ActorMethod<[], Array<ProductRate>>,
   'submitPurchaseOrder' : ActorMethod<[PurchaseOrderInput], bigint>,
   'trackOrder' : ActorMethod<[bigint, string], [] | [PurchaseOrder]>,
   'updateOrderStatus' : ActorMethod<[bigint, OrderStatus], undefined>,

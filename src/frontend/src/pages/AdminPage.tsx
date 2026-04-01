@@ -429,7 +429,7 @@ const PRODUCT_CONFIGS = [
   { type: "copperRod" as const, label: "Copper Rod", icon: "📏" },
 ];
 
-const CURRENCIES = ["USD", "INR", "EUR", "AED", "GBP"];
+const CURRENCIES = ["INR", "USD", "EUR", "AED", "GBP"];
 const UNITS = ["kg", "ton", "meter", "piece", "roll", "sheet"];
 
 function ProductRatesCard() {
@@ -438,7 +438,7 @@ function ProductRatesCard() {
   const [editingType, setEditingType] = useState<string | null>(null);
   const [formState, setFormState] = useState({
     pricePerUnit: "",
-    currency: "USD",
+    currency: "INR",
     unit: "kg",
     notes: "",
   });

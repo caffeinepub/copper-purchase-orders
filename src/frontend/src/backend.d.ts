@@ -63,6 +63,14 @@ export enum UserRole {
     user = "user",
     guest = "guest"
 }
+export interface ProductRate {
+    productType: string;
+    pricePerUnit: string;
+    currency: string;
+    unit: string;
+    notes: string;
+    updatedAt: bigint;
+}
 export interface backendInterface {
     assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
     getAllPurchaseOrders(): Promise<Array<PurchaseOrder>>;
@@ -87,4 +95,6 @@ export interface backendInterface {
     updateOrderStatus(orderId: bigint, newStatus: OrderStatus): Promise<void>;
     replyToOrder(orderId: bigint, availability: SellerAvailability, replyMessage: string): Promise<void>;
     trackOrder(orderId: bigint, email: string): Promise<PurchaseOrder | null>;
+    setProductRate(productType: CopperProductType, pricePerUnit: string, currency: string, unit: string, notes: string): Promise<void>;
+    getProductRates(): Promise<Array<ProductRate>>;
 }

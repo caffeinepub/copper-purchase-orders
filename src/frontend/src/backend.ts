@@ -135,6 +135,21 @@ export enum UserRole {
     user = "user",
     guest = "guest"
 }
+export enum SellerAvailability {
+    available = "available",
+    unavailable = "unavailable",
+    partial = "partial"
+}
+export interface ProductRate {
+    productType: string;
+    pricePerUnit: string;
+    currency: string;
+    unit: string;
+    notes: string;
+    updatedAt: bigint;
+}
+
+
 export interface backendInterface {
     _initializeAccessControlWithSecret(userSecret: string): Promise<void>;
     assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
@@ -364,6 +379,27 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async replyToOrder(arg0, arg1, arg2) {
+        const result = await this.actor.replyToOrder(arg0, to_candid_SellerAvailability(arg1), arg2);
+        return result;
+    }
+    async setProductRate(arg0, arg1, arg2, arg3, arg4) {
+        const result = await this.actor.setProductRate(to_candid_CopperProductType_n18(this._uploadFile, this._downloadFile, arg0), arg1, arg2, arg3, arg4);
+        return result;
+    }
+    async getProductRates() {
+        const result = await this.actor.getProductRates();
+        const self = this;
+        return result.map((r) => ({
+            productType: from_candid_variant_n9(self._uploadFile, self._downloadFile, r.productType),
+            pricePerUnit: r.pricePerUnit,
+            currency: r.currency,
+            unit: r.unit,
+            notes: r.notes,
+            updatedAt: r.updatedAt,
+        }));
+    }
+
 }
 function from_candid_CopperProductType_n8(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _CopperProductType): CopperProductType {
     return from_candid_variant_n9(_uploadFile, _downloadFile, value);
@@ -563,6 +599,10 @@ function to_candid_variant_n2(_uploadFile: (file: ExternalBlob) => Promise<Uint8
         guest: null
     } : value;
 }
+function to_candid_SellerAvailability(value) {
+    return value == "available" ? { available: null } : value == "unavailable" ? { unavailable: null } : value == "partial" ? { partial: null } : { available: null };
+}
+
 export interface CreateActorOptions {
     agent?: Agent;
     agentOptions?: HttpAgentOptions;
