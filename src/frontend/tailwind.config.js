@@ -16,8 +16,9 @@ export default {
     },
     extend: {
       fontFamily: {
-        display: ["Fraunces", "serif"],
-        body: ["GeneralSans", "system-ui", "sans-serif"],
+        display: ["PlusJakartaSans", "Figtree", "system-ui", "sans-serif"],
+        body: ["Figtree", "PlusJakartaSans", "system-ui", "sans-serif"],
+        mono: ["JetBrains Mono", "monospace"],
       },
       colors: {
         border: "oklch(var(--border))",
@@ -25,6 +26,10 @@ export default {
         ring: "oklch(var(--ring) / <alpha-value>)",
         background: "oklch(var(--background))",
         foreground: "oklch(var(--foreground))",
+        nav: {
+          DEFAULT: "oklch(var(--nav))",
+          foreground: "oklch(var(--nav-foreground))",
+        },
         primary: {
           DEFAULT: "oklch(var(--primary) / <alpha-value>)",
           foreground: "oklch(var(--primary-foreground))",
@@ -78,7 +83,9 @@ export default {
       },
       boxShadow: {
         xs: "0 1px 2px 0 rgba(0,0,0,0.05)",
-        copper: "0 4px 24px -4px oklch(0.62 0.12 55 / 0.25)",
+        card: "0 1px 3px 0 rgba(0,0,0,0.08), 0 1px 2px -1px rgba(0,0,0,0.05)",
+        "card-md": "0 4px 6px -1px rgba(0,0,0,0.08), 0 2px 4px -2px rgba(0,0,0,0.05)",
+        teal: "0 4px 24px -4px oklch(0.52 0.11 178 / 0.28)",
       },
       keyframes: {
         "accordion-down": {
@@ -89,10 +96,15 @@ export default {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
+        "fade-in": {
+          from: { opacity: "0", transform: "translateY(6px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        "fade-in": "fade-in 0.3s ease-out",
       },
     },
   },

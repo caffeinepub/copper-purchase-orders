@@ -7,62 +7,74 @@ import {
   createRoute,
   createRouter,
 } from "@tanstack/react-router";
-import { useState } from "react";
 import AdminPage from "./pages/AdminPage";
-import ConfirmationPage from "./pages/ConfirmationPage";
-import EmailGatePage from "./pages/EmailGatePage";
-import OrderFormPage from "./pages/OrderFormPage";
+import HomePage from "./pages/HomePage";
 import TrackOrderPage from "./pages/TrackOrderPage";
 
-const rootRoute = createRootRoute({
-  component: () => (
+function NavLayout() {
+  return (
     <>
+      <nav className="sticky top-0 z-50 bg-nav text-nav-foreground shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center h-14">
+            {/* Brand */}
+            <Link
+              to="/"
+              className="flex items-center gap-2 font-display font-bold text-[15px] text-nav-foreground/90 hover:text-nav-foreground transition-colors mr-8"
+              data-ocid="nav.link"
+            >
+              <span className="inline-flex items-center justify-center w-7 h-7 rounded bg-primary text-primary-foreground text-xs font-bold">
+                Cu
+              </span>
+              <span className="hidden sm:inline">Copper Orders</span>
+            </Link>
+
+            {/* Nav links */}
+            <div className="flex items-center gap-1 flex-1">
+              <Link
+                to="/"
+                className="px-3 py-1.5 text-[13px] font-medium text-nav-foreground/75 hover:text-nav-foreground hover:bg-white/10 rounded transition-colors"
+                activeProps={{ className: "text-nav-foreground bg-white/15" }}
+                data-ocid="nav.link"
+              >
+                Place Order
+              </Link>
+              <Link
+                to="/track"
+                className="px-3 py-1.5 text-[13px] font-medium text-nav-foreground/75 hover:text-nav-foreground hover:bg-white/10 rounded transition-colors"
+                activeProps={{ className: "text-nav-foreground bg-white/15" }}
+                data-ocid="nav.link"
+              >
+                Track Order
+              </Link>
+            </div>
+
+            {/* Admin link */}
+            <Link
+              to="/admin"
+              className="px-3 py-1.5 text-[13px] font-medium text-nav-foreground/60 hover:text-nav-foreground hover:bg-white/10 rounded transition-colors"
+              data-ocid="nav.link"
+            >
+              Admin
+            </Link>
+          </div>
+        </div>
+      </nav>
       <Outlet />
       <Toaster richColors />
     </>
-  ),
+  );
+}
+
+const rootRoute = createRootRoute({
+  component: NavLayout,
 });
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  component: IndexPage,
+  component: HomePage,
 });
-
-function IndexPage() {
-  const [gatedEmail, setGatedEmail] = useState<string | null>(() =>
-    sessionStorage.getItem("gated_email"),
-  );
-  const [orderId, setOrderId] = useState<bigint | null>(null);
-
-  if (orderId !== null) {
-    return (
-      <ConfirmationPage
-        orderId={orderId}
-        onReset={() => {
-          setOrderId(null);
-          setGatedEmail(null);
-          sessionStorage.removeItem("gated_email");
-        }}
-      />
-    );
-  }
-
-  if (gatedEmail) {
-    return (
-      <OrderFormPage email={gatedEmail} onSuccess={(id) => setOrderId(id)} />
-    );
-  }
-
-  return (
-    <EmailGatePage
-      onEmailSubmit={(email) => {
-        sessionStorage.setItem("gated_email", email);
-        setGatedEmail(email);
-      }}
-    />
-  );
-}
 
 const adminRoute = createRoute({
   getParentRoute: () => rootRoute,

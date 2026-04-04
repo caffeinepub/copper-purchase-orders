@@ -1,422 +1,464 @@
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Link } from "@tanstack/react-router";
 import {
   AlertCircle,
+  ArrowLeft,
   CheckCircle2,
   Clock,
   Loader2,
   Package,
   Search,
   XCircle,
-  Zap,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { toast } from "sonner";
 import {
   CopperProductType,
+  OrderStatus,
   type PurchaseOrder,
   SellerAvailability,
-} from "../backend.d";
-import { useTrackOrder } from "../hooks/useQueries";
+} from "../backend";
+import { getBackend } from "../backendService";
 
-const productLabels: Record<string, string> = {
+const PRODUCT_LABELS: Record<string, string> = {
   [CopperProductType.copperWire]: "Copper Wire",
   [CopperProductType.copperSheet]: "Copper Sheet",
   [CopperProductType.copperPipe]: "Copper Pipe",
   [CopperProductType.copperRod]: "Copper Rod",
 };
 
+const STEPPER_STEPS = [
+  "Order Placed",
+  "Under Review",
+  "Processing",
+  "Shipped",
+  "Completed",
+];
+
+function getStepIndex(status: OrderStatus): number {
+  switch (status) {
+    case OrderStatus.pending:
+      return 1;
+    case OrderStatus.processing:
+      return 2;
+    case OrderStatus.shipped:
+      return 3;
+    case OrderStatus.completed:
+      return 4;
+    case OrderStatus.cancelled:
+      return -1;
+    default:
+      return 0;
+  }
+}
+
 function AvailabilityBadge({
   availability,
 }: { availability: SellerAvailability | null }) {
-  if (!availability) return null;
+  if (!availability) {
+    return (
+      <Badge variant="secondary" className="text-xs">
+        Awaiting Reply
+      </Badge>
+    );
+  }
   if (availability === SellerAvailability.available) {
     return (
-      <span
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold"
-        style={{
-          background: "oklch(0.88 0.07 145)",
-          color: "oklch(0.3 0.1 140)",
-        }}
-      >
-        <CheckCircle2 className="w-4 h-4" /> Available
-      </span>
+      <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-xs">
+        <CheckCircle2 className="w-3 h-3 mr-1" /> Available
+      </Badge>
     );
   }
   if (availability === SellerAvailability.partial) {
     return (
-      <span
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold"
-        style={{
-          background: "oklch(0.9 0.05 75)",
-          color: "oklch(0.45 0.1 60)",
-        }}
-      >
-        <AlertCircle className="w-4 h-4" /> Partial Stock
-      </span>
+      <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-xs">
+        <AlertCircle className="w-3 h-3 mr-1" /> Partial
+      </Badge>
     );
   }
   return (
-    <span
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold"
-      style={{ background: "oklch(0.92 0.04 20)", color: "oklch(0.45 0.1 25)" }}
-    >
-      <XCircle className="w-4 h-4" /> Not Available
-    </span>
+    <Badge className="bg-red-100 text-red-800 border-red-200 text-xs">
+      <XCircle className="w-3 h-3 mr-1" /> Not Available
+    </Badge>
   );
 }
 
 export default function TrackOrderPage() {
   const [orderIdInput, setOrderIdInput] = useState("");
-  const [emailInput, setEmailInput] = useState("");
-  const [trackedOrder, setTrackedOrder] = useState<
-    PurchaseOrder | null | undefined
-  >(undefined);
-  const trackOrder = useTrackOrder();
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const id = params.get("orderId");
-    if (id) setOrderIdInput(id);
-  }, []);
+  const [emailInput, setEmailInput] = useState(
+    () => sessionStorage.getItem("order_email") ?? "",
+  );
+  const [isLoading, setIsLoading] = useState(false);
+  const [order, setOrder] = useState<PurchaseOrder | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [searched, setSearched] = useState(false);
 
   async function handleTrack(e: React.FormEvent) {
     e.preventDefault();
-    const id = BigInt(orderIdInput.trim());
-    const result = await trackOrder.mutateAsync({
-      orderId: id,
-      email: emailInput.trim(),
-    });
-    setTrackedOrder(result ?? null);
+    const idNum = Number.parseInt(orderIdInput.trim(), 10);
+    if (Number.isNaN(idNum) || idNum <= 0) {
+      toast.error("Please enter a valid Order ID.");
+      return;
+    }
+    const emailTrimmed = emailInput.trim();
+    if (!emailTrimmed) {
+      toast.error("Please enter your email address.");
+      return;
+    }
+
+    setIsLoading(true);
+    setNotFound(false);
+    setOrder(null);
+    setSearched(false);
+
+    try {
+      const result = await (await getBackend()).trackOrder(
+        BigInt(idNum),
+        emailTrimmed,
+      );
+      setSearched(true);
+      if (result === null) {
+        setNotFound(true);
+      } else {
+        setOrder(result);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to track order. Please try again.");
+      setSearched(true);
+    } finally {
+      setIsLoading(false);
+    }
   }
 
+  const stepIndex = order ? getStepIndex(order.status) : 0;
+  const isCancelled = order?.status === OrderStatus.cancelled;
+
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <header className="border-b border-border bg-card shadow-xs">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-8 h-8 rounded-md flex items-center justify-center"
-              style={{ background: "oklch(0.62 0.12 55)" }}
-            >
-              <Zap className="w-4 h-4 text-white" />
-            </div>
-            <span className="font-display font-bold text-foreground">
-              Copper Orders
-            </span>
-          </div>
-          <Link
-            to="/"
-            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            data-ocid="nav.link"
-          >
-            ← Place an Order
-          </Link>
+    <main className="min-h-screen bg-background">
+      {/* Page header */}
+      <div className="bg-white border-b border-border">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <p className="text-xs font-semibold tracking-widest uppercase text-primary mb-1">
+            Buyer Portal
+          </p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
+            Track Order
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Enter your Order ID and email to see the current status.
+          </p>
         </div>
-      </header>
+      </div>
 
-      <main className="flex-1 flex items-start justify-center px-4 py-12">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-          className="w-full max-w-2xl"
-        >
-          <div className="text-center mb-8">
-            <div
-              className="inline-flex items-center justify-center w-14 h-14 rounded-full mb-4"
-              style={{ background: "oklch(0.92 0.04 55)" }}
-            >
-              <Search
-                className="w-6 h-6"
-                style={{ color: "oklch(0.62 0.12 55)" }}
-              />
-            </div>
-            <h1 className="font-display text-3xl font-bold text-foreground">
-              Track Your Order
-            </h1>
-            <p className="text-muted-foreground mt-2">
-              Enter your Order ID and email address to check your order status.
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+        {/* Track form */}
+        <Card className="shadow-card border-border">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-base">Track Your Copper Order</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Enter the Order ID you received after submitting your order.
             </p>
-          </div>
-
-          <Card className="shadow-copper">
-            <CardContent className="pt-6">
-              <form onSubmit={handleTrack} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="orderId">Order ID</Label>
-                  <Input
-                    id="orderId"
-                    type="number"
-                    placeholder="e.g. 1001"
-                    value={orderIdInput}
-                    onChange={(e) => setOrderIdInput(e.target.value)}
-                    required
-                    min="1"
-                    data-ocid="track.input"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="trackEmail">Email Address</Label>
-                  <Input
-                    id="trackEmail"
-                    type="email"
-                    placeholder="The email used when ordering"
-                    value={emailInput}
-                    onChange={(e) => setEmailInput(e.target.value)}
-                    required
-                    data-ocid="track.search_input"
-                  />
-                </div>
+          </CardHeader>
+          <CardContent>
+            <form
+              onSubmit={handleTrack}
+              className="flex flex-col sm:flex-row gap-3"
+            >
+              <div className="flex-1">
+                <Label
+                  htmlFor="order-id"
+                  className="text-xs font-medium text-muted-foreground uppercase tracking-wide"
+                >
+                  Order ID
+                </Label>
+                <Input
+                  id="order-id"
+                  type="number"
+                  placeholder="e.g. 12345"
+                  value={orderIdInput}
+                  onChange={(e) => setOrderIdInput(e.target.value)}
+                  className="mt-1"
+                  min="1"
+                  data-ocid="track.input"
+                />
+              </div>
+              <div className="flex-1">
+                <Label
+                  htmlFor="track-email"
+                  className="text-xs font-medium text-muted-foreground uppercase tracking-wide"
+                >
+                  Email Address
+                </Label>
+                <Input
+                  id="track-email"
+                  type="email"
+                  placeholder="you@company.com"
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  className="mt-1"
+                  autoComplete="email"
+                  data-ocid="track.input"
+                />
+              </div>
+              <div className="flex items-end">
                 <Button
                   type="submit"
-                  className="w-full gap-2 font-semibold"
-                  style={{ background: "oklch(0.62 0.12 55)", color: "white" }}
-                  disabled={
-                    trackOrder.isPending || !orderIdInput || !emailInput
-                  }
-                  data-ocid="track.submit_button"
+                  disabled={isLoading}
+                  className="w-full sm:w-auto bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-6"
+                  data-ocid="track.primary_button"
                 >
-                  {trackOrder.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Tracking…
+                    </>
                   ) : (
-                    <Search className="w-4 h-4" />
+                    <>
+                      <Search className="w-4 h-4 mr-2" />
+                      Track Order
+                    </>
                   )}
-                  {trackOrder.isPending ? "Searching..." : "Track Order"}
                 </Button>
-              </form>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+
+        {/* Loading state */}
+        {isLoading && (
+          <div className="text-center py-12" data-ocid="track.loading_state">
+            <Loader2 className="w-8 h-8 text-primary animate-spin mx-auto mb-3" />
+            <p className="text-muted-foreground text-sm">
+              Fetching your order…
+            </p>
+          </div>
+        )}
+
+        {/* Not found */}
+        {searched && notFound && !isLoading && (
+          <Card
+            className="shadow-card border-border"
+            data-ocid="track.error_state"
+          >
+            <CardContent className="py-12 text-center">
+              <Package className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+              <p className="font-semibold text-foreground mb-1">
+                Order Not Found
+              </p>
+              <p className="text-sm text-muted-foreground">
+                No order matches that ID and email. Please double-check your
+                details.
+              </p>
             </CardContent>
           </Card>
+        )}
 
-          <AnimatePresence mode="wait">
-            {trackOrder.isError && (
-              <motion.div
-                key="error"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className="mt-4"
-                data-ocid="track.error_state"
-              >
-                <Alert variant="destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    Something went wrong. Please try again.
-                  </AlertDescription>
-                </Alert>
-              </motion.div>
+        {/* Order details */}
+        {order && !isLoading && (
+          <div
+            className="space-y-5 animate-fade-in"
+            data-ocid="track.success_state"
+          >
+            {/* Status stepper */}
+            {!isCancelled && (
+              <Card className="shadow-card border-border overflow-hidden">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Order Progress</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-0">
+                    {STEPPER_STEPS.map((step, i) => {
+                      const isActive = i <= stepIndex;
+                      const isCurrent = i === stepIndex;
+                      return (
+                        <div key={step} className="flex-1 flex items-center">
+                          <div className="flex flex-col items-center flex-1">
+                            <div
+                              className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-colors ${
+                                isCurrent
+                                  ? "bg-primary text-primary-foreground border-primary"
+                                  : isActive
+                                    ? "bg-primary/20 text-primary border-primary/40"
+                                    : "bg-muted text-muted-foreground border-border"
+                              }`}
+                            >
+                              {isActive ? (
+                                <CheckCircle2 className="w-4 h-4" />
+                              ) : (
+                                i + 1
+                              )}
+                            </div>
+                            <p
+                              className={`text-[10px] mt-1.5 text-center leading-tight font-medium ${
+                                isCurrent
+                                  ? "text-primary"
+                                  : isActive
+                                    ? "text-foreground/70"
+                                    : "text-muted-foreground"
+                              }`}
+                            >
+                              {step}
+                            </p>
+                          </div>
+                          {i < STEPPER_STEPS.length - 1 && (
+                            <div
+                              className={`flex-1 h-0.5 -mt-5 mx-1 rounded-full ${
+                                i < stepIndex ? "bg-primary/40" : "bg-border"
+                              }`}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
             )}
 
-            {trackedOrder === null && (
-              <motion.div
-                key="not-found"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className="mt-4"
-                data-ocid="track.error_state"
-              >
-                <Alert variant="destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    Order not found. Please check your Order ID and email
-                    address.
-                  </AlertDescription>
-                </Alert>
-              </motion.div>
+            {isCancelled && (
+              <div className="flex items-center gap-2 p-4 rounded-lg bg-red-50 border border-red-200 text-red-800">
+                <XCircle className="w-5 h-5 flex-shrink-0" />
+                <p className="text-sm font-medium">
+                  This order has been cancelled.
+                </p>
+              </div>
             )}
 
-            {trackedOrder && (
-              <motion.div
-                key="result"
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className="mt-6 space-y-4"
-                data-ocid="track.success_state"
-              >
-                {/* Seller Reply Status */}
-                {trackedOrder.sellerReply ? (
-                  <Card
-                    className="border-2"
-                    style={{
-                      borderColor:
-                        trackedOrder.sellerAvailability ===
-                        SellerAvailability.available
-                          ? "oklch(0.6 0.1 145)"
-                          : trackedOrder.sellerAvailability ===
-                              SellerAvailability.partial
-                            ? "oklch(0.65 0.1 75)"
-                            : "oklch(0.55 0.1 25)",
-                    }}
-                  >
-                    <CardHeader className="pb-3">
-                      <CardTitle className="font-display text-lg flex items-center gap-2">
-                        Seller Response
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <div>
-                        <AvailabilityBadge
-                          availability={trackedOrder.sellerAvailability}
-                        />
-                      </div>
-                      <p className="text-sm text-foreground bg-muted rounded-lg p-3">
-                        {trackedOrder.sellerReply}
-                      </p>
-                      {trackedOrder.sellerReplyTimestamp && (
-                        <p className="text-xs text-muted-foreground">
-                          Replied{" "}
-                          {new Date(
-                            Number(trackedOrder.sellerReplyTimestamp) /
-                              1_000_000,
-                          ).toLocaleString()}
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <Card
-                    className="border-2"
-                    style={{ borderColor: "oklch(0.88 0.025 60)" }}
-                  >
-                    <CardContent
-                      className="pt-6 pb-6 text-center"
-                      data-ocid="track.loading_state"
-                    >
+            {/* Order info */}
+            <Card className="shadow-card border-border">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">
+                    Order #{order.id.toString()}
+                  </CardTitle>
+                  <AvailabilityBadge availability={order.sellerAvailability} />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Placed:{" "}
+                  {new Date(
+                    Number(order.timestamp / 1_000_000n),
+                  ).toLocaleString()}
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Items */}
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                    Ordered Items
+                  </p>
+                  <div className="space-y-2">
+                    {order.items.map((item, i) => (
                       <div
-                        className="inline-flex items-center justify-center w-12 h-12 rounded-full mb-3"
-                        style={{ background: "oklch(0.92 0.04 55)" }}
+                        key={`item-${i}-${item.productType}`}
+                        className="flex items-center justify-between py-2 px-3 rounded-md bg-muted/50"
                       >
-                        <Clock
-                          className="w-6 h-6"
-                          style={{ color: "oklch(0.62 0.12 55)" }}
-                        />
+                        <div className="text-sm">
+                          <span className="font-medium">
+                            {PRODUCT_LABELS[item.productType] ??
+                              item.productType}
+                          </span>
+                          <span className="text-muted-foreground ml-2">
+                            — {item.size}
+                          </span>
+                        </div>
+                        <div className="text-sm text-right">
+                          <span className="font-semibold">
+                            {item.quantity.toString()}
+                          </span>
+                          <span className="text-muted-foreground ml-1">
+                            {item.unitOfMeasurement}
+                          </span>
+                        </div>
                       </div>
-                      <h3 className="font-display font-semibold text-foreground mb-1">
-                        Under Review
-                      </h3>
-                      <p className="text-sm text-muted-foreground">
-                        Your order is being reviewed by our team. We'll confirm
-                        availability soon.
+                    ))}
+                  </div>
+                </div>
+
+                {/* Seller reply */}
+                {order.sellerAvailability !== null && (
+                  <>
+                    <Separator />
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                        Seller Reply
                       </p>
-                    </CardContent>
-                  </Card>
+                      <div className="p-3 rounded-lg bg-muted/50">
+                        <div className="flex items-center gap-2 mb-1">
+                          <AvailabilityBadge
+                            availability={order.sellerAvailability}
+                          />
+                          {order.sellerReplyTimestamp && (
+                            <span className="text-xs text-muted-foreground">
+                              {new Date(
+                                Number(order.sellerReplyTimestamp / 1_000_000n),
+                              ).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                        {order.sellerReply && (
+                          <p className="text-sm text-foreground mt-2">
+                            {order.sellerReply}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </>
                 )}
 
-                {/* Order Details */}
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="font-display text-base flex items-center gap-2">
-                      <Package
-                        className="w-4 h-4"
-                        style={{ color: "oklch(0.62 0.12 55)" }}
-                      />
-                      Order #{trackedOrder.id.toString()}
-                      <Badge
-                        className="ml-auto"
-                        style={{
-                          background: "oklch(0.62 0.12 55)",
-                          color: "white",
-                        }}
-                      >
-                        {trackedOrder.status}
-                      </Badge>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <Separator className="mb-3" />
-                    <dl className="space-y-2 mb-4">
-                      {[
-                        { label: "Customer", value: trackedOrder.customerName },
-                        { label: "Company", value: trackedOrder.companyName },
-                        {
-                          label: "Delivery Date",
-                          value: trackedOrder.requiredDeliveryDate,
-                        },
-                      ].map(({ label, value }) => (
-                        <div
-                          key={label}
-                          className="flex justify-between items-center text-sm"
-                        >
-                          <dt className="text-muted-foreground">{label}</dt>
-                          <dd className="font-medium text-foreground">
-                            {value}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-
-                    {/* Items table */}
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                      Ordered Items
+                {order.sellerAvailability === null && (
+                  <div className="flex items-center gap-2 p-3 rounded-lg bg-yellow-50 border border-yellow-200 text-yellow-800">
+                    <Clock className="w-4 h-4 flex-shrink-0" />
+                    <p className="text-sm">
+                      Awaiting seller reply — check back soon.
                     </p>
-                    <div className="rounded-lg border border-border overflow-hidden">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Product Type</TableHead>
-                            <TableHead>Size</TableHead>
-                            <TableHead>Quantity</TableHead>
-                            <TableHead>Unit</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {(trackedOrder.items ?? []).map((item, i) => (
-                            <TableRow
-                              key={`${item.productType}-${item.size}`}
-                              data-ocid={`track.item.${i + 1}` as any}
-                            >
-                              <TableCell className="font-medium">
-                                {productLabels[item.productType] ??
-                                  item.productType}
-                              </TableCell>
-                              <TableCell
-                                style={{ color: "oklch(0.55 0.1 55)" }}
-                              >
-                                {item.size}
-                              </TableCell>
-                              <TableCell>{item.quantity.toString()}</TableCell>
-                              <TableCell>{item.unitOfMeasurement}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
-      </main>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
-      <footer className="py-6 text-center text-xs text-muted-foreground">
-        © {new Date().getFullYear()}. Built with love using{" "}
-        <a
-          href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
-          target="_blank"
-          rel="noreferrer"
-          className="hover:underline"
-          style={{ color: "oklch(0.62 0.12 55)" }}
-        >
-          caffeine.ai
-        </a>
-      </footer>
-    </div>
+        {/* CTA back home */}
+        <div className="flex items-center justify-between py-2">
+          <Link to="/" data-ocid="track.link">
+            <Button variant="ghost" size="sm" className="text-muted-foreground">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Order Form
+            </Button>
+          </Link>
+        </div>
+      </div>
+
+      <TrackFooter />
+    </main>
+  );
+}
+
+function TrackFooter() {
+  const year = new Date().getFullYear();
+  const hostname = encodeURIComponent(window.location.hostname);
+  return (
+    <footer className="bg-nav text-nav-foreground mt-10">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <Separator className="bg-white/10 mb-5" />
+        <p className="text-center text-xs text-nav-foreground/50">
+          © {year}. Built with ❤️ using{" "}
+          <a
+            href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${hostname}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-nav-foreground underline"
+          >
+            caffeine.ai
+          </a>
+        </p>
+      </div>
+    </footer>
   );
 }

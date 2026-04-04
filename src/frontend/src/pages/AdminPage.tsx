@@ -3,15 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -21,1170 +13,891 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { Link } from "@tanstack/react-router";
 import {
   AlertCircle,
-  CheckCheck,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock,
-  DollarSign,
-  Edit2,
-  Eye,
-  EyeOff,
   Loader2,
-  Lock,
   LogOut,
-  Mail,
-  MessageSquare,
-  Package,
-  Send,
-  ShieldAlert,
+  RefreshCw,
+  Save,
+  Search,
   TrendingUp,
-  Truck,
   XCircle,
-  Zap,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   CopperProductType,
   OrderStatus,
+  type ProductRate,
+  type PurchaseOrder,
   SellerAvailability,
-} from "../backend.d";
-import type { PurchaseOrder } from "../backend.d";
-import {
-  useGetAllOrders,
-  useGetOrderSummary,
-  useGetProductRates,
-  useReplyToOrder,
-  useSetProductRate,
-  useUpdateOrderStatus,
-} from "../hooks/useQueries";
-import type { ProductRate } from "../hooks/useQueries";
+} from "../backend";
+import { getBackend } from "../backendService";
 
-const SELLER_EMAIL = "dhairyashah1812@gmail.com";
-const SELLER_PASSWORD = "Copper@1812";
+const ADMIN_EMAIL = "dhairyashah1812@gmail.com";
+const ADMIN_PASSWORD = "Copper@1812";
 
-const productLabels: Record<string, string> = {
+const PRODUCT_LABELS: Record<string, string> = {
   [CopperProductType.copperWire]: "Copper Wire",
   [CopperProductType.copperSheet]: "Copper Sheet",
   [CopperProductType.copperPipe]: "Copper Pipe",
   [CopperProductType.copperRod]: "Copper Rod",
 };
 
-const statusConfig: Record<
-  string,
-  { label: string; style: React.CSSProperties }
-> = {
-  [OrderStatus.pending]: {
-    label: "Pending",
-    style: { background: "oklch(0.9 0.05 75)", color: "oklch(0.45 0.1 60)" },
-  },
-  [OrderStatus.processing]: {
-    label: "Processing",
-    style: { background: "oklch(0.88 0.06 230)", color: "oklch(0.35 0.1 240)" },
-  },
-  [OrderStatus.shipped]: {
-    label: "Shipped",
-    style: { background: "oklch(0.88 0.07 160)", color: "oklch(0.35 0.1 150)" },
-  },
-  [OrderStatus.completed]: {
-    label: "Completed",
-    style: { background: "oklch(0.88 0.07 145)", color: "oklch(0.3 0.1 140)" },
-  },
-  [OrderStatus.cancelled]: {
-    label: "Cancelled",
-    style: { background: "oklch(0.92 0.04 20)", color: "oklch(0.45 0.1 25)" },
-  },
-};
-
-const SKELETON_KEYS = ["sk-1", "sk-2", "sk-3", "sk-4", "sk-5"];
-
-const QUICK_REPLIES: {
+const RATE_PRODUCTS: {
+  type: CopperProductType;
   label: string;
-  availability: SellerAvailability;
-  message: string;
+  defaultRate: string;
 }[] = [
   {
-    label: "✅ In Stock",
-    availability: SellerAvailability.available,
-    message:
-      "Great news! The item is in stock. We are confirming your order and will arrange delivery as requested.",
+    type: CopperProductType.copperWire,
+    label: "Copper Wire",
+    defaultRate: "850",
   },
   {
-    label: "⚠️ Partial",
-    availability: SellerAvailability.partial,
-    message:
-      "We have partial stock available. Please contact us to discuss how we can fulfil your order.",
+    type: CopperProductType.copperSheet,
+    label: "Copper Sheet",
+    defaultRate: "920",
   },
   {
-    label: "❌ Out of Stock",
-    availability: SellerAvailability.unavailable,
-    message:
-      "Unfortunately this item is currently out of stock. We will notify you when it becomes available.",
+    type: CopperProductType.copperPipe,
+    label: "Copper Pipe",
+    defaultRate: "970",
+  },
+  {
+    type: CopperProductType.copperRod,
+    label: "Copper Rod",
+    defaultRate: "810",
   },
 ];
 
-interface ReplyFormProps {
-  order: PurchaseOrder;
-  onDone: () => void;
-}
-
-function ReplyForm({ order, onDone }: ReplyFormProps) {
-  const [availability, setAvailability] = useState<SellerAvailability | "">(
-    order.sellerAvailability ?? "",
-  );
-  const [message, setMessage] = useState(order.sellerReply ?? "");
-  const replyToOrder = useReplyToOrder();
-
-  function applyQuickReply(qr: (typeof QUICK_REPLIES)[number]) {
-    setAvailability(qr.availability);
-    setMessage(qr.message);
+function AvailabilityBadge({
+  availability,
+}: { availability: SellerAvailability | null }) {
+  if (!availability) {
+    return (
+      <Badge variant="secondary" className="text-xs whitespace-nowrap">
+        Awaiting Reply
+      </Badge>
+    );
   }
-
-  async function handleSend() {
-    if (!availability || !message.trim()) {
-      toast.error("Please select availability and write a message.");
-      return;
-    }
-    try {
-      await replyToOrder.mutateAsync({
-        orderId: order.id,
-        availability: availability as SellerAvailability,
-        replyMessage: message.trim(),
-      });
-      toast.success("Reply sent to buyer.");
-      onDone();
-    } catch {
-      toast.error("Failed to send reply.");
-    }
+  if (availability === SellerAvailability.available) {
+    return (
+      <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-xs">
+        ✓ Available
+      </Badge>
+    );
   }
-
+  if (availability === SellerAvailability.partial) {
+    return (
+      <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-xs">
+        ~ Partial
+      </Badge>
+    );
+  }
   return (
-    <div className="space-y-3 pt-3">
-      <Separator />
-      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        Availability
-      </p>
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => applyQuickReply(QUICK_REPLIES[0])}
-          className="flex-1 min-w-[90px] flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg border-2 text-xs font-bold transition-all"
-          style={{
-            borderColor:
-              availability === SellerAvailability.available
-                ? "oklch(0.5 0.14 145)"
-                : "oklch(0.75 0.06 145)",
-            background:
-              availability === SellerAvailability.available
-                ? "oklch(0.88 0.07 145)"
-                : "transparent",
-            color:
-              availability === SellerAvailability.available
-                ? "oklch(0.3 0.1 140)"
-                : "oklch(0.45 0.08 145)",
-          }}
-          data-ocid="admin.reply.button"
-        >
-          <CheckCircle2 className="w-4 h-4" /> Available
-        </button>
-        <button
-          type="button"
-          onClick={() => applyQuickReply(QUICK_REPLIES[1])}
-          className="flex-1 min-w-[90px] flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg border-2 text-xs font-bold transition-all"
-          style={{
-            borderColor:
-              availability === SellerAvailability.partial
-                ? "oklch(0.55 0.12 75)"
-                : "oklch(0.78 0.06 75)",
-            background:
-              availability === SellerAvailability.partial
-                ? "oklch(0.9 0.05 75)"
-                : "transparent",
-            color:
-              availability === SellerAvailability.partial
-                ? "oklch(0.4 0.1 60)"
-                : "oklch(0.5 0.08 70)",
-          }}
-          data-ocid="admin.reply.button"
-        >
-          <AlertCircle className="w-4 h-4" /> Partial
-        </button>
-        <button
-          type="button"
-          onClick={() => applyQuickReply(QUICK_REPLIES[2])}
-          className="flex-1 min-w-[90px] flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg border-2 text-xs font-bold transition-all"
-          style={{
-            borderColor:
-              availability === SellerAvailability.unavailable
-                ? "oklch(0.52 0.12 25)"
-                : "oklch(0.78 0.06 20)",
-            background:
-              availability === SellerAvailability.unavailable
-                ? "oklch(0.92 0.04 20)"
-                : "transparent",
-            color:
-              availability === SellerAvailability.unavailable
-                ? "oklch(0.38 0.1 25)"
-                : "oklch(0.5 0.08 20)",
-          }}
-          data-ocid="admin.reply.button"
-        >
-          <XCircle className="w-4 h-4" /> Not Available
-        </button>
-      </div>
-
-      <div className="space-y-2">
-        <Label>Reply Message</Label>
-        <Textarea
-          placeholder="e.g. We have 500kg in stock, can deliver by the requested date..."
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          rows={3}
-          data-ocid="admin.reply.textarea"
-        />
-      </div>
-
-      <div className="flex gap-2">
-        <Button
-          size="sm"
-          onClick={handleSend}
-          disabled={replyToOrder.isPending}
-          className="gap-1.5 font-semibold"
-          style={{ background: "oklch(0.62 0.12 55)", color: "white" }}
-          data-ocid="admin.reply.submit_button"
-        >
-          {replyToOrder.isPending ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Send className="w-3.5 h-3.5" />
-          )}
-          Send Reply
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={onDone}
-          data-ocid="admin.reply.cancel_button"
-        >
-          Cancel
-        </Button>
-      </div>
-    </div>
+    <Badge className="bg-red-100 text-red-800 border-red-200 text-xs">
+      ✗ Not Available
+    </Badge>
   );
 }
 
-function LoginGate({ onAuthenticated }: { onAuthenticated: () => void }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
+function OrderStatusBadge({ status }: { status: OrderStatus }) {
+  const cfg: Record<OrderStatus, { label: string; cls: string }> = {
+    [OrderStatus.pending]: {
+      label: "Pending",
+      cls: "bg-yellow-100 text-yellow-800 border-yellow-200",
+    },
+    [OrderStatus.processing]: {
+      label: "Processing",
+      cls: "bg-blue-100 text-blue-800 border-blue-200",
+    },
+    [OrderStatus.shipped]: {
+      label: "Shipped",
+      cls: "bg-purple-100 text-purple-800 border-purple-200",
+    },
+    [OrderStatus.completed]: {
+      label: "Completed",
+      cls: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    },
+    [OrderStatus.cancelled]: {
+      label: "Cancelled",
+      cls: "bg-red-100 text-red-800 border-red-200",
+    },
+  };
+  const c = cfg[status] ?? { label: status, cls: "bg-gray-100 text-gray-800" };
+  return <Badge className={`${c.cls} text-xs`}>{c.label}</Badge>;
+}
+
+// ────────────────────────────────────────────────────────────
+// Login Screen
+// ────────────────────────────────────────────────────────────
+function LoginScreen({ onLogin }: { onLogin: () => void }) {
+  const [emailVal, setEmailVal] = useState("");
+  const [passwordVal, setPasswordVal] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
     setError("");
-    await new Promise((r) => setTimeout(r, 400));
-    if (
-      email.trim().toLowerCase() === SELLER_EMAIL.toLowerCase() &&
-      password === SELLER_PASSWORD
-    ) {
-      sessionStorage.setItem("sellerAuthenticated", "true");
-      onAuthenticated();
-    } else {
-      setError("Invalid email or password.");
-    }
-    setLoading(false);
+    setIsLoading(true);
+    // Simulate brief loading for UX
+    setTimeout(() => {
+      if (emailVal.trim() === ADMIN_EMAIL && passwordVal === ADMIN_PASSWORD) {
+        onLogin();
+      } else {
+        setError("Invalid email or password. Access denied.");
+      }
+      setIsLoading(false);
+    }, 400);
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-sm"
-      >
+    <main className="min-h-screen bg-background flex items-center justify-center px-4 py-16">
+      <div className="w-full max-w-md animate-fade-in">
         <div className="text-center mb-8">
-          <div
-            className="inline-flex items-center justify-center w-16 h-16 rounded-full mb-4"
-            style={{ background: "oklch(0.92 0.04 55)" }}
-          >
-            <ShieldAlert
-              className="w-7 h-7"
-              style={{ color: "oklch(0.62 0.12 55)" }}
-            />
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-nav text-nav-foreground font-bold text-lg mb-4">
+            Cu
           </div>
-          <h1 className="font-display text-2xl font-bold text-foreground mb-2">
-            Seller Portal
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            Enter your credentials to access the admin dashboard.
+          <p className="text-xs font-semibold tracking-widest uppercase text-primary mb-1">
+            Admin Dashboard
+          </p>
+          <h1 className="text-2xl font-bold text-foreground">Seller Login</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Access restricted to authorized sellers only.
           </p>
         </div>
 
-        <Card className="shadow-copper">
+        <Card className="shadow-card-md border-border">
           <CardContent className="pt-6">
             <form
               onSubmit={handleSubmit}
               className="space-y-4"
               data-ocid="admin.modal"
             >
-              <div className="space-y-2">
-                <Label htmlFor="sellerEmail">Email Address</Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    id="sellerEmail"
-                    type="email"
-                    placeholder="your@email.com"
-                    value={email}
-                    onChange={(e) => {
-                      setEmail(e.target.value);
-                      setError("");
-                    }}
-                    className="pl-9"
-                    required
-                    autoFocus
-                    data-ocid="admin.email.input"
-                  />
-                </div>
+              <div>
+                <Label htmlFor="admin-email" className="text-sm font-medium">
+                  Email Address
+                </Label>
+                <Input
+                  id="admin-email"
+                  type="email"
+                  placeholder="seller@example.com"
+                  value={emailVal}
+                  onChange={(e) => setEmailVal(e.target.value)}
+                  className="mt-1.5"
+                  autoComplete="email"
+                  data-ocid="admin.input"
+                />
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="sellerPassword">Password</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    id="sellerPassword"
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Enter your password"
-                    value={password}
-                    onChange={(e) => {
-                      setPassword(e.target.value);
-                      setError("");
-                    }}
-                    className="pl-9 pr-10"
-                    required
-                    data-ocid="admin.password.input"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                    tabIndex={-1}
-                  >
-                    {showPassword ? (
-                      <EyeOff className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
+              <div>
+                <Label htmlFor="admin-password" className="text-sm font-medium">
+                  Password
+                </Label>
+                <Input
+                  id="admin-password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={passwordVal}
+                  onChange={(e) => setPasswordVal(e.target.value)}
+                  className="mt-1.5"
+                  autoComplete="current-password"
+                  data-ocid="admin.input"
+                />
               </div>
 
               {error && (
-                <p
-                  className="text-xs text-destructive flex items-center gap-1"
-                  data-ocid="admin.email.error_state"
+                <div
+                  className="flex items-center gap-2 p-3 rounded-md bg-red-50 border border-red-200 text-red-700 text-sm"
+                  data-ocid="admin.error_state"
                 >
-                  <AlertCircle className="w-3 h-3" /> {error}
-                </p>
+                  <XCircle className="w-4 h-4 flex-shrink-0" />
+                  {error}
+                </div>
               )}
 
               <Button
                 type="submit"
-                className="w-full font-semibold gap-2"
-                disabled={loading || !email || !password}
-                style={{ background: "oklch(0.62 0.12 55)", color: "white" }}
-                data-ocid="admin.primary_button"
+                disabled={isLoading}
+                className="w-full bg-primary text-primary-foreground hover:bg-primary/90 h-10 font-semibold"
+                data-ocid="admin.submit_button"
               >
-                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                {loading ? "Verifying..." : "Access Dashboard"}
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Verifying…
+                  </>
+                ) : (
+                  "Sign In to Dashboard"
+                )}
               </Button>
             </form>
           </CardContent>
         </Card>
-
-        <div className="mt-4 text-center">
-          <Link
-            to="/"
-            className="text-sm text-muted-foreground hover:underline"
-            data-ocid="nav.link"
-          >
-            ← Back to Order Form
-          </Link>
-        </div>
-      </motion.div>
-    </div>
+      </div>
+    </main>
   );
 }
 
-const PRODUCT_CONFIGS = [
-  { type: "copperWire" as const, label: "Copper Wire", icon: "🔌" },
-  { type: "copperSheet" as const, label: "Copper Sheet", icon: "📄" },
-  { type: "copperPipe" as const, label: "Copper Pipe", icon: "🔧" },
-  { type: "copperRod" as const, label: "Copper Rod", icon: "📏" },
-];
+// ────────────────────────────────────────────────────────────
+// Rates Editor
+// ────────────────────────────────────────────────────────────
+function RatesEditor() {
+  const [rateValues, setRateValues] = useState<
+    Record<CopperProductType, string>
+  >(
+    () =>
+      Object.fromEntries(
+        RATE_PRODUCTS.map((p) => [p.type, p.defaultRate]),
+      ) as Record<CopperProductType, string>,
+  );
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingRates, setIsLoadingRates] = useState(true);
+  const [lastSaved, setLastSaved] = useState<string | null>(null);
 
-const CURRENCIES = ["INR", "USD", "EUR", "AED", "GBP"];
-const UNITS = ["kg", "ton", "meter", "piece", "roll", "sheet"];
+  useEffect(() => {
+    getBackend()
+      .then((b) => b.getProductRates())
+      .then((data: ProductRate[]) => {
+        const updates: Partial<Record<CopperProductType, string>> = {};
+        for (const r of data) {
+          if (r.pricePerUnit && Number.parseFloat(r.pricePerUnit) > 0) {
+            updates[r.productType as CopperProductType] = r.pricePerUnit;
+          }
+        }
+        if (Object.keys(updates).length > 0) {
+          setRateValues((prev) => ({ ...prev, ...updates }));
+        }
+      })
+      .catch(() => {
+        // Fall back to defaults
+      })
+      .finally(() => setIsLoadingRates(false));
+  }, []);
 
-function ProductRatesCard() {
-  const { data: rates, isLoading } = useGetProductRates();
-  const setRate = useSetProductRate();
-  const [editingType, setEditingType] = useState<string | null>(null);
-  const [formState, setFormState] = useState({
-    pricePerUnit: "",
-    currency: "INR",
-    unit: "kg",
-    notes: "",
-  });
-
-  function getRateForProduct(productType: string): ProductRate | undefined {
-    return rates?.find((r) => r.productType === productType);
-  }
-
-  function startEdit(productType: string) {
-    const existing = getRateForProduct(productType);
-    setFormState({
-      pricePerUnit: existing?.pricePerUnit ?? "",
-      currency: existing?.currency ?? "USD",
-      unit: existing?.unit ?? "kg",
-      notes: existing?.notes ?? "",
-    });
-    setEditingType(productType);
-  }
-
-  async function handleSave(productType: string) {
-    const price = formState.pricePerUnit.trim();
-    if (!price || Number.isNaN(Number(price)) || Number(price) <= 0) {
-      toast.error("Please enter a valid price.");
-      return;
-    }
+  async function handleSaveRates() {
+    setIsSaving(true);
     try {
-      await setRate.mutateAsync({
-        productType: productType as CopperProductType,
-        pricePerUnit: price,
-        currency: formState.currency,
-        unit: formState.unit,
-        notes: formState.notes.trim(),
+      const b = await getBackend();
+      await Promise.all(
+        RATE_PRODUCTS.map((p) =>
+          b.setProductRate(
+            p.type,
+            rateValues[p.type] || p.defaultRate,
+            "INR",
+            "kg",
+            "",
+          ),
+        ),
+      );
+      const now = new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
       });
-      toast.success("Rate saved.");
-      setEditingType(null);
-    } catch {
-      toast.error("Failed to save rate.");
+      setLastSaved(now);
+      toast.success("Rates saved successfully!");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to save rates. Please try again.");
+    } finally {
+      setIsSaving(false);
     }
-  }
-
-  function formatUpdatedAt(ts: bigint): string {
-    const ms = Number(ts) / 1_000_000;
-    return new Date(ms).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
   }
 
   return (
-    <Card className="shadow-copper mb-8">
-      <CardHeader>
-        <div className="flex items-center gap-3">
-          <div
-            className="w-8 h-8 rounded-md flex items-center justify-center"
-            style={{ background: "oklch(0.62 0.12 55)" }}
-          >
-            <DollarSign className="w-4 h-4 text-white" />
-          </div>
-          <div>
-            <CardTitle className="font-display text-xl">
-              Product Rates
-            </CardTitle>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Set pricing that buyers will see before placing orders
-            </p>
-          </div>
+    <Card className="shadow-card border-border">
+      <CardHeader className="pb-4">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-primary" />
+            Product Rates (INR/kg)
+          </CardTitle>
+          {lastSaved && (
+            <span className="text-xs text-muted-foreground">
+              Saved at {lastSaved}
+            </span>
+          )}
         </div>
+        <p className="text-sm text-muted-foreground">
+          Set current prices visible to buyers on the order form.
+        </p>
       </CardHeader>
       <CardContent>
-        {isLoading ? (
-          <div className="space-y-3" data-ocid="admin.rates.loading_state">
-            {["sk-r1", "sk-r2", "sk-r3", "sk-r4"].map((k) => (
-              <Skeleton key={k} className="h-14 w-full" />
+        {isLoadingRates ? (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-20 bg-muted animate-pulse rounded-md" />
             ))}
           </div>
         ) : (
-          <div className="space-y-3">
-            {PRODUCT_CONFIGS.map(({ type, label, icon }) => {
-              const rate = getRateForProduct(type);
-              const isEditing = editingType === type;
-              return (
-                <div
-                  key={type}
-                  className="rounded-lg border border-border bg-muted/20 overflow-hidden"
-                  data-ocid={`admin.rates.${type}.card` as any}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+            {RATE_PRODUCTS.map((p) => (
+              <div key={p.type}>
+                <Label
+                  htmlFor={`rate-${p.type}`}
+                  className="text-xs font-medium text-muted-foreground uppercase tracking-wide"
                 >
-                  <div className="flex items-center justify-between p-3 gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="text-xl">{icon}</span>
-                      <div className="min-w-0">
-                        <p className="font-semibold text-sm text-foreground">
-                          {label}
-                        </p>
-                        {rate ? (
-                          <p className="text-xs text-muted-foreground">
-                            <span
-                              className="font-bold"
-                              style={{ color: "oklch(0.52 0.12 55)" }}
-                            >
-                              {rate.currency} {rate.pricePerUnit}/{rate.unit}
-                            </span>
-                            {rate.notes ? ` · ${rate.notes}` : ""}
-                            {" · Updated "}
-                            {formatUpdatedAt(rate.updatedAt)}
-                          </p>
-                        ) : (
-                          <Badge
-                            variant="outline"
-                            className="text-xs mt-0.5"
-                            style={{
-                              color: "oklch(0.55 0.08 55)",
-                              borderColor: "oklch(0.75 0.06 55)",
-                            }}
-                          >
-                            Not set
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        isEditing ? setEditingType(null) : startEdit(type)
-                      }
-                      className="gap-1.5 text-xs shrink-0"
-                      data-ocid={`admin.rates.${type}.edit_button` as any}
-                    >
-                      <Edit2 className="w-3 h-3" />
-                      {isEditing ? "Cancel" : "Edit"}
-                    </Button>
-                  </div>
-
-                  <AnimatePresence>
-                    {isEditing && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="overflow-hidden"
-                      >
-                        <div
-                          className="px-3 pb-3 pt-1 border-t border-border bg-muted/30"
-                          style={{ borderTopColor: "oklch(0.88 0.05 55)" }}
-                        >
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-                            <div>
-                              <Label className="text-xs">Price Per Unit</Label>
-                              <Input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                placeholder="850.00"
-                                value={formState.pricePerUnit}
-                                onChange={(e) =>
-                                  setFormState((p) => ({
-                                    ...p,
-                                    pricePerUnit: e.target.value,
-                                  }))
-                                }
-                                className="mt-1 h-8 text-sm"
-                                data-ocid={
-                                  `admin.rates.${type}.price.input` as any
-                                }
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-xs">Currency</Label>
-                              <Select
-                                value={formState.currency}
-                                onValueChange={(v) =>
-                                  setFormState((p) => ({ ...p, currency: v }))
-                                }
-                              >
-                                <SelectTrigger
-                                  className="mt-1 h-8 text-sm"
-                                  data-ocid={
-                                    `admin.rates.${type}.currency.select` as any
-                                  }
-                                >
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {CURRENCIES.map((c) => (
-                                    <SelectItem key={c} value={c}>
-                                      {c}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div>
-                              <Label className="text-xs">Unit</Label>
-                              <Select
-                                value={formState.unit}
-                                onValueChange={(v) =>
-                                  setFormState((p) => ({ ...p, unit: v }))
-                                }
-                              >
-                                <SelectTrigger
-                                  className="mt-1 h-8 text-sm"
-                                  data-ocid={
-                                    `admin.rates.${type}.unit.select` as any
-                                  }
-                                >
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {UNITS.map((u) => (
-                                    <SelectItem key={u} value={u}>
-                                      {u}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div>
-                              <Label className="text-xs">Notes</Label>
-                              <Input
-                                placeholder="e.g. bulk discount"
-                                value={formState.notes}
-                                onChange={(e) =>
-                                  setFormState((p) => ({
-                                    ...p,
-                                    notes: e.target.value,
-                                  }))
-                                }
-                                className="mt-1 h-8 text-sm"
-                                data-ocid={
-                                  `admin.rates.${type}.notes.input` as any
-                                }
-                              />
-                            </div>
-                          </div>
-                          <Button
-                            size="sm"
-                            onClick={() => handleSave(type)}
-                            disabled={setRate.isPending}
-                            className="gap-1.5 font-semibold"
-                            style={{
-                              background: "oklch(0.62 0.12 55)",
-                              color: "white",
-                            }}
-                            data-ocid={`admin.rates.${type}.save_button` as any}
-                          >
-                            {setRate.isPending ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : null}
-                            Save Rate
-                          </Button>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                  {p.label}
+                </Label>
+                <div className="relative mt-1.5">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                    ₹
+                  </span>
+                  <Input
+                    id={`rate-${p.type}`}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder={p.defaultRate}
+                    value={rateValues[p.type]}
+                    onChange={(e) =>
+                      setRateValues((prev) => ({
+                        ...prev,
+                        [p.type]: e.target.value,
+                      }))
+                    }
+                    className="pl-7"
+                    data-ocid="admin.input"
+                  />
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         )}
+        <Button
+          onClick={handleSaveRates}
+          disabled={isSaving || isLoadingRates}
+          className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-teal"
+          data-ocid="admin.save_button"
+        >
+          {isSaving ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Saving Rates…
+            </>
+          ) : (
+            <>
+              <Save className="w-4 h-4 mr-2" />
+              Save Rates
+            </>
+          )}
+        </Button>
       </CardContent>
     </Card>
   );
 }
 
-export default function AdminPage() {
-  const [authenticated, setAuthenticated] = useState(
-    () => sessionStorage.getItem("sellerAuthenticated") === "true",
-  );
+// ────────────────────────────────────────────────────────────
+// Order Row (expandable)
+// ────────────────────────────────────────────────────────────
+function OrderRow({
+  order,
+  idx,
+  onReply,
+}: {
+  order: PurchaseOrder;
+  idx: number;
+  onReply: (
+    orderId: bigint,
+    availability: SellerAvailability,
+    message: string,
+  ) => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [replyMessage, setReplyMessage] = useState(order.sellerReply ?? "");
+  const [isReplying, setIsReplying] = useState(false);
 
-  const { data: orders, isLoading: loadingOrders } = useGetAllOrders();
-  const { data: summary, isLoading: loadingSummary } = useGetOrderSummary();
-  const updateStatus = useUpdateOrderStatus();
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const [replyingId, setReplyingId] = useState<string | null>(null);
-
-  async function handleStatusChange(orderId: bigint, status: OrderStatus) {
-    setUpdatingId(orderId.toString());
+  async function handleReply(availability: SellerAvailability) {
+    setIsReplying(true);
     try {
-      await updateStatus.mutateAsync({ orderId, status });
-      toast.success("Order status updated.");
-    } catch {
-      toast.error("Failed to update status.");
+      await onReply(order.id, availability, replyMessage);
+      toast.success("Reply sent successfully!");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to send reply.");
     } finally {
-      setUpdatingId(null);
+      setIsReplying(false);
     }
   }
 
-  function handleLogout() {
-    sessionStorage.removeItem("sellerAuthenticated");
-    setAuthenticated(false);
-  }
-
-  if (!authenticated) {
-    return <LoginGate onAuthenticated={() => setAuthenticated(true)} />;
-  }
-
-  const sortedOrders = orders
-    ? [...orders].sort((a, b) => {
-        const aNoReply = !a.sellerReply ? 0 : 1;
-        const bNoReply = !b.sellerReply ? 0 : 1;
-        return aNoReply - bNoReply;
-      })
-    : [];
-
-  const statCards = [
-    {
-      label: "Total Orders",
-      value: summary?.totalOrders,
-      icon: Package,
-      color: "oklch(0.62 0.12 55)",
-    },
-    {
-      label: "Awaiting Reply",
-      value: summary?.awaitingReply,
-      icon: MessageSquare,
-      color: "oklch(0.58 0.12 60)",
-      highlight: true,
-    },
-    {
-      label: "Pending",
-      value: summary?.pendingOrders,
-      icon: Clock,
-      color: "oklch(0.65 0.1 75)",
-    },
-    {
-      label: "Processing",
-      value: summary?.processingOrders,
-      icon: TrendingUp,
-      color: "oklch(0.55 0.1 230)",
-    },
-    {
-      label: "Shipped",
-      value: summary?.shippedOrders,
-      icon: Truck,
-      color: "oklch(0.5 0.1 160)",
-    },
-    {
-      label: "Completed",
-      value: summary?.completedOrders,
-      icon: CheckCheck,
-      color: "oklch(0.45 0.1 145)",
-    },
-    {
-      label: "Cancelled",
-      value: summary?.cancelledOrders,
-      icon: XCircle,
-      color: "oklch(0.5 0.08 20)",
-    },
-  ];
+  const needsReply = order.sellerAvailability === null;
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <header className="border-b border-border bg-card shadow-xs">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-8 h-8 rounded-md flex items-center justify-center"
-              style={{ background: "oklch(0.62 0.12 55)" }}
-            >
-              <Zap className="w-4 h-4 text-white" />
-            </div>
-            <span className="font-display font-bold text-foreground">
-              Copper Orders
-            </span>
-            <span
-              className="text-xs font-medium px-2 py-0.5 rounded-full"
-              style={{
-                background: "oklch(0.92 0.04 55)",
-                color: "oklch(0.45 0.1 50)",
-              }}
-            >
-              Admin
-            </span>
+    <>
+      <TableRow
+        className={`cursor-pointer hover:bg-muted/50 transition-colors ${needsReply ? "bg-yellow-50/60" : ""}`}
+        onClick={() => setExpanded((p) => !p)}
+        data-ocid={`admin.row.${idx + 1}`}
+      >
+        <TableCell className="font-mono text-sm font-semibold">
+          #{order.id.toString()}
+        </TableCell>
+        <TableCell className="text-sm">{order.email}</TableCell>
+        <TableCell className="text-xs text-muted-foreground">
+          {new Date(Number(order.timestamp / 1_000_000n)).toLocaleDateString(
+            "en-IN",
+            {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+            },
+          )}
+        </TableCell>
+        <TableCell>
+          <div className="flex flex-wrap gap-1">
+            {order.items.map((item, i) => (
+              <Badge
+                key={`${item.productType}-${i}`}
+                variant="outline"
+                className="text-[11px]"
+              >
+                {PRODUCT_LABELS[item.productType] ?? item.productType} ·{" "}
+                {item.size} · {item.quantity.toString()}{" "}
+                {item.unitOfMeasurement}
+              </Badge>
+            ))}
           </div>
-          <div className="flex items-center gap-4">
-            <Link
-              to="/"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-              data-ocid="nav.link"
-            >
-              ← Customer Portal
-            </Link>
+        </TableCell>
+        <TableCell>
+          <OrderStatusBadge status={order.status} />
+        </TableCell>
+        <TableCell>
+          <AvailabilityBadge availability={order.sellerAvailability} />
+        </TableCell>
+        <TableCell>
+          {expanded ? (
+            <ChevronUp className="w-4 h-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+          )}
+        </TableCell>
+      </TableRow>
+
+      {expanded && (
+        <TableRow>
+          <TableCell colSpan={7} className="bg-muted/20 px-6 py-4">
+            <div className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Reply Controls
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Textarea
+                  placeholder="Optional reply message to buyer…"
+                  value={replyMessage}
+                  onChange={(e) => setReplyMessage(e.target.value)}
+                  className="flex-1 min-h-[80px] text-sm resize-none"
+                  data-ocid="admin.textarea"
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <div className="flex flex-row sm:flex-col gap-2 sm:justify-end">
+                  <Button
+                    size="sm"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex-1 sm:flex-none"
+                    disabled={isReplying}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleReply(SellerAvailability.available);
+                    }}
+                    data-ocid={`admin.confirm_button.${idx + 1}`}
+                  >
+                    {isReplying ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="w-3 h-3 mr-1" />
+                    )}
+                    Available
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-orange-500 hover:bg-orange-600 text-white font-semibold flex-1 sm:flex-none"
+                    disabled={isReplying}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleReply(SellerAvailability.partial);
+                    }}
+                    data-ocid={`admin.secondary_button.${idx + 1}`}
+                  >
+                    {isReplying ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <AlertCircle className="w-3 h-3 mr-1" />
+                    )}
+                    Partial
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-red-600 hover:bg-red-700 text-white font-semibold flex-1 sm:flex-none"
+                    disabled={isReplying}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleReply(SellerAvailability.unavailable);
+                    }}
+                    data-ocid={`admin.delete_button.${idx + 1}`}
+                  >
+                    {isReplying ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <XCircle className="w-3 h-3 mr-1" />
+                    )}
+                    Not Available
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </TableCell>
+        </TableRow>
+      )}
+    </>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Dashboard
+// ────────────────────────────────────────────────────────────
+function Dashboard({ onLogout }: { onLogout: () => void }) {
+  const [orders, setOrders] = useState<PurchaseOrder[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [lastRefreshed, setLastRefreshed] = useState<string>("");
+
+  const loadOrders = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const data = await (await getBackend()).getAllPurchaseOrders();
+      // Sort: needs reply first, then by timestamp descending
+      const sorted = [...data].sort((a, b) => {
+        const aNeeds = a.sellerAvailability === null ? 0 : 1;
+        const bNeeds = b.sellerAvailability === null ? 0 : 1;
+        if (aNeeds !== bNeeds) return aNeeds - bNeeds;
+        return Number(b.timestamp - a.timestamp);
+      });
+      setOrders(sorted);
+      setLastRefreshed(
+        new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      );
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load orders.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadOrders();
+  }, [loadOrders]);
+
+  async function handleReply(
+    orderId: bigint,
+    availability: SellerAvailability,
+    message: string,
+  ) {
+    await (await getBackend()).replyToOrder(orderId, availability, message);
+    await loadOrders();
+  }
+
+  const filtered = orders.filter(
+    (o) =>
+      !searchQuery ||
+      o.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      o.id.toString().includes(searchQuery),
+  );
+
+  const awaitingCount = orders.filter(
+    (o) => o.sellerAvailability === null,
+  ).length;
+
+  return (
+    <main className="min-h-screen bg-background">
+      {/* Page header */}
+      <div className="bg-white border-b border-border">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-widest uppercase text-primary mb-1">
+                Admin Dashboard
+              </p>
+              <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
+                Dashboard Overview
+              </h1>
+            </div>
             <Button
               variant="outline"
               size="sm"
-              onClick={handleLogout}
-              className="gap-1.5 text-xs"
+              onClick={onLogout}
+              className="gap-2"
               data-ocid="admin.secondary_button"
             >
-              <LogOut className="w-3.5 h-3.5" /> Logout
+              <LogOut className="w-4 h-4" />
+              Logout
             </Button>
           </div>
         </div>
-      </header>
+      </div>
 
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-10">
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-        >
-          <h1 className="font-display text-3xl font-bold text-foreground mb-8">
-            Order Management
-          </h1>
+      {/* Rates strip */}
+      <RatesStrip />
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-4 mb-10">
-            {statCards.map(({ label, value, icon: Icon, color, highlight }) => (
-              <Card
-                key={label}
-                className="text-center"
-                style={
-                  highlight
-                    ? { borderColor: "oklch(0.62 0.12 55)", borderWidth: 2 }
-                    : {}
-                }
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        {/* Rates editor */}
+        <RatesEditor />
+
+        {/* Orders card */}
+        <Card className="shadow-card border-border">
+          <CardHeader className="pb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <CardTitle className="text-base">Orders</CardTitle>
+                {awaitingCount > 0 && (
+                  <Badge
+                    className="bg-yellow-100 text-yellow-800 border-yellow-200 text-xs font-semibold"
+                    data-ocid="admin.card"
+                  >
+                    <Clock className="w-3 h-3 mr-1" />
+                    {awaitingCount} Awaiting Reply
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by email or Order ID…"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9 h-9 text-sm w-56"
+                    data-ocid="admin.search_input"
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={loadOrders}
+                  disabled={isLoading}
+                  className="gap-1.5"
+                  data-ocid="admin.secondary_button"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`}
+                  />
+                  Refresh
+                </Button>
+                {lastRefreshed && (
+                  <span className="text-xs text-muted-foreground hidden sm:inline">
+                    Updated {lastRefreshed}
+                  </span>
+                )}
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {isLoading ? (
+              <div
+                className="py-16 text-center"
+                data-ocid="admin.loading_state"
               >
-                <CardContent className="pt-5 pb-4">
-                  {loadingSummary ? (
-                    <Skeleton className="h-8 w-12 mx-auto mb-1" />
-                  ) : (
-                    <div
-                      className="text-2xl font-bold font-display"
-                      style={{ color }}
-                    >
-                      {value?.toString() ?? "0"}
-                    </div>
-                  )}
-                  <div className="flex items-center justify-center gap-1 mt-1">
-                    <Icon className="w-3 h-3" style={{ color }} />
-                    <span className="text-xs text-muted-foreground">
-                      {label}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                <Loader2 className="w-7 h-7 text-primary animate-spin mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">Loading orders…</p>
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="py-16 text-center" data-ocid="admin.empty_state">
+                <Package className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                <p className="font-semibold text-foreground mb-1">
+                  {searchQuery
+                    ? "No orders match your search"
+                    : "No orders yet"}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {searchQuery
+                    ? "Try a different search term."
+                    : "Orders submitted by buyers will appear here."}
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table data-ocid="admin.table">
+                  <TableHeader>
+                    <TableRow className="bg-muted/40 hover:bg-muted/40">
+                      <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground w-24">
+                        Order ID
+                      </TableHead>
+                      <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Email
+                      </TableHead>
+                      <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground w-28">
+                        Date
+                      </TableHead>
+                      <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Items
+                      </TableHead>
+                      <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground w-28">
+                        Status
+                      </TableHead>
+                      <TableHead className="text-xs font-semibold uppercase tracking-wide text-muted-foreground w-32">
+                        Availability
+                      </TableHead>
+                      <TableHead className="w-10" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filtered.map((order, idx) => (
+                      <OrderRow
+                        key={order.id.toString()}
+                        order={order}
+                        idx={idx}
+                        onReply={handleReply}
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
-          <ProductRatesCard />
+      <AdminFooter />
+    </main>
+  );
+}
 
-          <Card className="shadow-copper">
-            <CardHeader>
-              <CardTitle className="font-display text-xl">
-                Purchase Orders
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              {loadingOrders ? (
-                <div
-                  className="p-6 space-y-3"
-                  data-ocid="admin.orders.loading_state"
-                >
-                  {SKELETON_KEYS.map((k) => (
-                    <Skeleton key={k} className="h-12 w-full" />
-                  ))}
-                </div>
-              ) : !sortedOrders.length ? (
-                <div
-                  className="p-12 text-center text-muted-foreground"
-                  data-ocid="admin.orders.empty_state"
-                >
-                  <Package className="w-10 h-10 mx-auto mb-3 opacity-40" />
-                  <p>No purchase orders yet.</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto" data-ocid="admin.orders.table">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Order</TableHead>
-                        <TableHead>Customer</TableHead>
-                        <TableHead>Items</TableHead>
-                        <TableHead>Delivery</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Update Status</TableHead>
-                        <TableHead>Seller Reply</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {sortedOrders.map((order, idx) => {
-                        const needsReply = !order.sellerReply;
-                        const isReplying = replyingId === order.id.toString();
-                        return (
-                          <TableRow
-                            key={order.id.toString()}
-                            data-ocid={`admin.orders.row.${idx + 1}` as any}
-                            style={
-                              needsReply
-                                ? {
-                                    borderLeft: "3px solid oklch(0.62 0.12 55)",
-                                  }
-                                : {}
-                            }
-                          >
-                            <TableCell className="font-mono text-xs">
-                              <div>#{order.id.toString()}</div>
-                              {needsReply && (
-                                <span
-                                  className="inline-flex items-center gap-1 text-xs font-semibold mt-1 px-1.5 py-0.5 rounded"
-                                  style={{
-                                    background: "oklch(0.9 0.05 75)",
-                                    color: "oklch(0.45 0.1 60)",
-                                  }}
-                                >
-                                  <AlertCircle className="w-2.5 h-2.5" /> Needs
-                                  Reply
-                                </span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <div className="font-medium">
-                                {order.customerName}
-                              </div>
-                              <div className="text-xs text-muted-foreground">
-                                {order.email}
-                              </div>
-                              <div className="text-xs text-muted-foreground">
-                                {order.companyName}
-                              </div>
-                            </TableCell>
-                            <TableCell className="min-w-56">
-                              <table className="text-xs w-full">
-                                <thead>
-                                  <tr className="text-muted-foreground">
-                                    <th className="text-left font-medium pb-1 pr-2">
-                                      Product
-                                    </th>
-                                    <th className="text-left font-medium pb-1 pr-2">
-                                      Size
-                                    </th>
-                                    <th className="text-left font-medium pb-1 pr-2">
-                                      Qty
-                                    </th>
-                                    <th className="text-left font-medium pb-1">
-                                      Unit
-                                    </th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {(order.items ?? []).map((item) => (
-                                    <tr
-                                      key={`${item.productType}-${item.size}`}
-                                      className="border-t border-border/40"
-                                    >
-                                      <td className="pr-2 py-0.5">
-                                        {productLabels[item.productType] ??
-                                          item.productType}
-                                      </td>
-                                      <td
-                                        className="pr-2 py-0.5 font-medium"
-                                        style={{ color: "oklch(0.55 0.1 55)" }}
-                                      >
-                                        {item.size}
-                                      </td>
-                                      <td className="pr-2 py-0.5">
-                                        {item.quantity.toString()}
-                                      </td>
-                                      <td className="py-0.5">
-                                        {item.unitOfMeasurement}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </TableCell>
-                            <TableCell>{order.requiredDeliveryDate}</TableCell>
-                            <TableCell>
-                              <Badge style={statusConfig[order.status]?.style}>
-                                {statusConfig[order.status]?.label ||
-                                  order.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              {updatingId === order.id.toString() ? (
-                                <Loader2
-                                  className="w-4 h-4 animate-spin"
-                                  style={{ color: "oklch(0.62 0.12 55)" }}
-                                />
-                              ) : (
-                                <Select
-                                  value={order.status}
-                                  onValueChange={(v) =>
-                                    handleStatusChange(
-                                      order.id,
-                                      v as OrderStatus,
-                                    )
-                                  }
-                                >
-                                  <SelectTrigger
-                                    className="h-8 w-36"
-                                    data-ocid={
-                                      `admin.orders.status.select.${idx + 1}` as any
-                                    }
-                                  >
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value={OrderStatus.pending}>
-                                      Pending
-                                    </SelectItem>
-                                    <SelectItem value={OrderStatus.processing}>
-                                      Processing
-                                    </SelectItem>
-                                    <SelectItem value={OrderStatus.shipped}>
-                                      Shipped
-                                    </SelectItem>
-                                    <SelectItem value={OrderStatus.completed}>
-                                      Completed
-                                    </SelectItem>
-                                    <SelectItem value={OrderStatus.cancelled}>
-                                      Cancelled
-                                    </SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              )}
-                            </TableCell>
-                            <TableCell className="min-w-64">
-                              <AnimatePresence mode="wait">
-                                {isReplying ? (
-                                  <motion.div
-                                    key="form"
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    exit={{ opacity: 0 }}
-                                  >
-                                    <ReplyForm
-                                      order={order}
-                                      onDone={() => setReplyingId(null)}
-                                    />
-                                  </motion.div>
-                                ) : order.sellerReply ? (
-                                  <motion.div
-                                    key="sent"
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    className="space-y-2"
-                                  >
-                                    {order.sellerAvailability ===
-                                      SellerAvailability.available && (
-                                      <span
-                                        className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full"
-                                        style={{
-                                          background: "oklch(0.88 0.07 145)",
-                                          color: "oklch(0.3 0.1 140)",
-                                        }}
-                                      >
-                                        <CheckCircle2 className="w-3 h-3" />{" "}
-                                        Available
-                                      </span>
-                                    )}
-                                    {order.sellerAvailability ===
-                                      SellerAvailability.partial && (
-                                      <span
-                                        className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full"
-                                        style={{
-                                          background: "oklch(0.9 0.05 75)",
-                                          color: "oklch(0.45 0.1 60)",
-                                        }}
-                                      >
-                                        <AlertCircle className="w-3 h-3" />{" "}
-                                        Partial
-                                      </span>
-                                    )}
-                                    {order.sellerAvailability ===
-                                      SellerAvailability.unavailable && (
-                                      <span
-                                        className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full"
-                                        style={{
-                                          background: "oklch(0.92 0.04 20)",
-                                          color: "oklch(0.45 0.1 25)",
-                                        }}
-                                      >
-                                        <XCircle className="w-3 h-3" />{" "}
-                                        Unavailable
-                                      </span>
-                                    )}
-                                    <p className="text-xs text-muted-foreground line-clamp-2">
-                                      {order.sellerReply}
-                                    </p>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className="h-7 text-xs gap-1"
-                                      onClick={() =>
-                                        setReplyingId(order.id.toString())
-                                      }
-                                      data-ocid={
-                                        `admin.orders.edit_button.${idx + 1}` as any
-                                      }
-                                    >
-                                      <Edit2 className="w-3 h-3" /> Edit Reply
-                                    </Button>
-                                  </motion.div>
-                                ) : (
-                                  <motion.div
-                                    key="none"
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                  >
-                                    <Button
-                                      size="sm"
-                                      className="h-8 text-xs gap-1.5 font-semibold"
-                                      style={{
-                                        background: "oklch(0.62 0.12 55)",
-                                        color: "white",
-                                      }}
-                                      onClick={() =>
-                                        setReplyingId(order.id.toString())
-                                      }
-                                      data-ocid={
-                                        `admin.orders.button.${idx + 1}` as any
-                                      }
-                                    >
-                                      <MessageSquare className="w-3.5 h-3.5" />{" "}
-                                      Reply to Order
-                                    </Button>
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
-      </main>
+// Compact rates display strip at top of dashboard
+function RatesStrip() {
+  const [rates, setRates] = useState<
+    Array<{ label: string; rate: string; type: CopperProductType }>
+  >([]);
+  const [updatedAt, setUpdatedAt] = useState("");
 
-      <footer className="py-6 text-center text-xs text-muted-foreground">
-        © {new Date().getFullYear()}. Built with love using{" "}
-        <a
-          href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
-          target="_blank"
-          rel="noreferrer"
-          className="hover:underline"
-          style={{ color: "oklch(0.62 0.12 55)" }}
-        >
-          caffeine.ai
-        </a>
-      </footer>
+  useEffect(() => {
+    getBackend()
+      .then((b) => b.getProductRates())
+      .then((data: ProductRate[]) => {
+        const sorted = RATE_PRODUCTS.map((p) => {
+          const found = data.find((r) => r.productType === p.type);
+          return {
+            label: p.label.replace("Copper ", ""),
+            rate: found?.pricePerUnit || p.defaultRate,
+            type: p.type,
+          };
+        });
+        setRates(sorted);
+        const latest = data.reduce(
+          (m, r) => (r.updatedAt > m ? r.updatedAt : m),
+          0n,
+        );
+        if (latest > 0n) {
+          setUpdatedAt(
+            new Date(Number(latest / 1_000_000n)).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+          );
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  if (rates.length === 0) return null;
+
+  return (
+    <div className="bg-white border-b border-border shadow-xs">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-[13px]">
+          <span className="font-semibold text-foreground/80">
+            Current Copper Rates (INR/kg):
+          </span>
+          {rates.map((r) => (
+            <span key={r.type}>
+              <span className="text-muted-foreground">{r.label}:</span>{" "}
+              <span className="font-semibold text-foreground">
+                ₹{Number.parseFloat(r.rate).toLocaleString()}
+              </span>
+            </span>
+          ))}
+          {updatedAt && (
+            <span className="ml-auto text-muted-foreground text-xs">
+              Updated: {updatedAt}
+            </span>
+          )}
+        </div>
+      </div>
     </div>
   );
+}
+
+function Package({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M16.5 9.4 7.55 4.24" />
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      <polyline points="3.29 7 12 12 20.71 7" />
+      <line x1="12" x2="12" y1="22" y2="12" />
+    </svg>
+  );
+}
+
+function AdminFooter() {
+  const year = new Date().getFullYear();
+  const hostname = encodeURIComponent(window.location.hostname);
+  return (
+    <footer className="bg-nav text-nav-foreground mt-10">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <Separator className="bg-white/10 mb-5" />
+        <p className="text-center text-xs text-nav-foreground/50">
+          © {year}. Built with ❤️ using{" "}
+          <a
+            href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${hostname}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-nav-foreground underline"
+          >
+            caffeine.ai
+          </a>
+        </p>
+      </div>
+    </footer>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// Main export
+// ────────────────────────────────────────────────────────────
+export default function AdminPage() {
+  const [isLoggedIn, setIsLoggedIn] = useState(() => {
+    return sessionStorage.getItem("admin_logged_in") === "1";
+  });
+
+  function handleLogin() {
+    sessionStorage.setItem("admin_logged_in", "1");
+    setIsLoggedIn(true);
+  }
+
+  function handleLogout() {
+    sessionStorage.removeItem("admin_logged_in");
+    setIsLoggedIn(false);
+  }
+
+  if (!isLoggedIn) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
+  return <Dashboard onLogout={handleLogout} />;
 }

@@ -19,8 +19,6 @@ actor {
     #copperRod;
   };
 
-  // ── Legacy type kept so the old stable variable `purchaseOrders` remains
-  //    upgrade-compatible.  Do NOT remove until after the migration cycle.
   type PurchaseOrderLegacy = {
     id : Nat;
     timestamp : Int;
@@ -88,10 +86,10 @@ actor {
 
   type ProductRate = {
     productType : CopperProductType;
-    pricePerUnit : Text;   // e.g. "850.00"
-    currency : Text;       // e.g. "USD", "INR"
-    unit : Text;           // e.g. "kg", "ton"
-    notes : Text;          // optional seller notes
+    pricePerUnit : Text;
+    currency : Text;
+    unit : Text;
+    notes : Text;
     updatedAt : Int;
   };
 
@@ -105,20 +103,41 @@ actor {
     };
   };
 
-  // ── Stable storage ──────────────────────────────────────────────────────────
+  // ── Stable storage (survives upgrades) ─────────────────────────────────────
+  stable var _legacyOrderEntries : [(Nat, PurchaseOrderLegacy)] = [];
+  stable var _ordersV2Entries : [(Nat, PurchaseOrder)] = [];
+  stable var _productRateEntries : [(Text, ProductRate)] = [];
+  stable var _nextOrderId : Nat = 1;
+  stable var _migrationDone : Bool = false;
+  // ────────────────────────────────────────────────────────────────────────────
+
+  // ── In-memory maps (rebuilt from stable arrays on upgrade) ─────────────────
   let purchaseOrders = Map.empty<Nat, PurchaseOrderLegacy>();
   let purchaseOrdersV2 = Map.empty<Nat, PurchaseOrder>();
   let productRates = Map.empty<Text, ProductRate>();
-
-  // ── Default rates (INR) ─────────────────────────────────────────────────────
-  productRates.add("copperWire", { productType = #copperWire; pricePerUnit = "850"; currency = "INR"; unit = "kg"; notes = ""; updatedAt = 0 });
-  productRates.add("copperSheet", { productType = #copperSheet; pricePerUnit = "900"; currency = "INR"; unit = "kg"; notes = ""; updatedAt = 0 });
-  productRates.add("copperPipe", { productType = #copperPipe; pricePerUnit = "950"; currency = "INR"; unit = "kg"; notes = ""; updatedAt = 0 });
-  productRates.add("copperRod", { productType = #copperRod; pricePerUnit = "880"; currency = "INR"; unit = "kg"; notes = ""; updatedAt = 0 });
+  var nextOrderId = _nextOrderId;
+  var migrationDone = _migrationDone;
   // ────────────────────────────────────────────────────────────────────────────
 
-  var nextOrderId = 1;
-  var migrationDone = false;
+  // ── Restore in-memory maps from stable storage on startup/upgrade ───────────
+  for ((k, v) in _legacyOrderEntries.vals()) {
+    purchaseOrders.add(k, v);
+  };
+  for ((k, v) in _ordersV2Entries.vals()) {
+    purchaseOrdersV2.add(k, v);
+  };
+  for ((k, v) in _productRateEntries.vals()) {
+    productRates.add(k, v);
+  };
+  // ────────────────────────────────────────────────────────────────────────────
+
+  // ── Seed default rates only on first install (empty map) ───────────────────
+  if (productRates.size() == 0) {
+    productRates.add("copperWire",  { productType = #copperWire;  pricePerUnit = "850"; currency = "INR"; unit = "kg"; notes = ""; updatedAt = 0 });
+    productRates.add("copperSheet", { productType = #copperSheet; pricePerUnit = "900"; currency = "INR"; unit = "kg"; notes = ""; updatedAt = 0 });
+    productRates.add("copperPipe",  { productType = #copperPipe;  pricePerUnit = "950"; currency = "INR"; unit = "kg"; notes = ""; updatedAt = 0 });
+    productRates.add("copperRod",   { productType = #copperRod;   pricePerUnit = "880"; currency = "INR"; unit = "kg"; notes = ""; updatedAt = 0 });
+  };
   // ────────────────────────────────────────────────────────────────────────────
 
   let accessControlState = AccessControl.initState();
@@ -126,7 +145,17 @@ actor {
 
   let userProfiles = Map.empty<Principal, UserProfile>();
 
-  // ── Migration: runs once after upgrade ──────────────────────────────────────
+  // ── Serialize maps to stable arrays before upgrade ──────────────────────────
+  system func preupgrade() {
+    _legacyOrderEntries := purchaseOrders.entries().toArray();
+    _ordersV2Entries    := purchaseOrdersV2.entries().toArray();
+    _productRateEntries := productRates.entries().toArray();
+    _nextOrderId        := nextOrderId;
+    _migrationDone      := migrationDone;
+  };
+  // ────────────────────────────────────────────────────────────────────────────
+
+  // ── V1 → V2 migration (runs once) ──────────────────────────────────────────
   system func postupgrade() {
     if (not migrationDone) {
       var maxId = 0;
@@ -217,10 +246,7 @@ actor {
     purchaseOrdersV2.get(orderId);
   };
 
-  public shared ({ caller }) func replyToOrder(orderId : Nat, availability : SellerAvailability, replyMessage : Text) : async () {
-    if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized: Only admins can reply to orders");
-    };
+  public shared func replyToOrder(orderId : Nat, availability : SellerAvailability, replyMessage : Text) : async () {
     switch (purchaseOrdersV2.get(orderId)) {
       case (null) { Runtime.trap("Order not found") };
       case (?order) {
@@ -240,17 +266,11 @@ actor {
     };
   };
 
-  public query ({ caller }) func getAllPurchaseOrders() : async [PurchaseOrder] {
-    if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized");
-    };
+  public query func getAllPurchaseOrders() : async [PurchaseOrder] {
     purchaseOrdersV2.values().toArray().sort(PurchaseOrderModule.compareByTimestamp);
   };
 
-  public shared ({ caller }) func updateOrderStatus(orderId : Nat, newStatus : OrderStatus) : async () {
-    if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized");
-    };
+  public shared func updateOrderStatus(orderId : Nat, newStatus : OrderStatus) : async () {
     switch (purchaseOrdersV2.get(orderId)) {
       case (null) { Runtime.trap("Order not found") };
       case (?order) {
@@ -259,7 +279,7 @@ actor {
     };
   };
 
-  public query ({ caller }) func getOrderSummary() : async {
+  public query func getOrderSummary() : async {
     totalOrders : Nat;
     pendingOrders : Nat;
     processingOrders : Nat;
@@ -268,9 +288,6 @@ actor {
     cancelledOrders : Nat;
     awaitingReply : Nat;
   } {
-    if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized");
-    };
     var pending = 0;
     var processing = 0;
     var shipped = 0;
@@ -301,19 +318,13 @@ actor {
     };
   };
 
-  public query ({ caller }) func getOrdersByStatus(status : OrderStatus) : async [PurchaseOrder] {
-    if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized");
-    };
+  public query func getOrdersByStatus(status : OrderStatus) : async [PurchaseOrder] {
     purchaseOrdersV2.values().toArray().filter(
       func(order) { order.status == status }
     ).sort(PurchaseOrderModule.compareByTimestamp);
   };
 
-  public query ({ caller }) func getOrdersByCompany(companyName : Text) : async [PurchaseOrder] {
-    if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized");
-    };
+  public query func getOrdersByCompany(companyName : Text) : async [PurchaseOrder] {
     purchaseOrdersV2.values().toArray().filter(
       func(order) { order.companyName == companyName }
     ).sort(PurchaseOrderModule.compareByTimestamp);
@@ -329,10 +340,10 @@ actor {
     notes : Text,
   ) : async () {
     let key = switch (productType) {
-      case (#copperWire) { "copperWire" };
+      case (#copperWire)  { "copperWire"  };
       case (#copperSheet) { "copperSheet" };
-      case (#copperPipe) { "copperPipe" };
-      case (#copperRod) { "copperRod" };
+      case (#copperPipe)  { "copperPipe"  };
+      case (#copperRod)   { "copperRod"   };
     };
     productRates.add(key, {
       productType;
